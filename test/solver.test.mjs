@@ -270,3 +270,18 @@ test('challenges: each one can be won with a sensible build, and the obvious che
   assert.equal(tooSmall.stars, 0);
   assert.deepEqual(tooSmall.missing, ['30 m² under roof']);
 });
+
+test('a long window is one opening: 6 m of glass in brick cracks, a concrete lintel or a steel frame spans it', () => {
+  const house = (mat, lintel) => {
+    const pieces = box(mat, 0, 0, 16, 12, 0).map((p) => (p.j1 === 0 && p.j2 === 0 && p.i1 >= 2 && p.i2 <= 14 ? { ...p, type: 'window' } : p));
+    pieces.push({ type: 'roof', mat: 'brick', i0: 0, j0: 0, i1: 16, j1: 12, s: 0, axis: 'x', pitch: 30 });
+    if (lintel) for (let i = 0; i < 16; i++) pieces.push({ type: 'beam', mat: lintel, i1: i, j1: 0, i2: i + 1, j2: 0, s: 0 });
+    return buildModel(withIds(pieces));
+  };
+  const brick = house('brick');
+  assert.ok(!brick.elems.some((e) => e.role === 'wall shear strut' && brick.nodes[e.n1].z === 0 && brick.nodes[e.n2].z === 0 &&
+    Math.min(brick.nodes[e.n1].x, brick.nodes[e.n2].x) >= 1.5 && Math.max(brick.nodes[e.n1].x, brick.nodes[e.n2].x) <= 6.5), 'no struts inside the opening');
+  assert.ok(new Structure(brick).run({ deadOnly: true }).summary.failedCount > 0);
+  assert.equal(new Structure(house('steel')).run({ deadOnly: true }).summary.failedCount, 0);
+  assert.equal(new Structure(house('brick', 'concrete')).run({ deadOnly: true }).summary.failedCount, 0);
+});

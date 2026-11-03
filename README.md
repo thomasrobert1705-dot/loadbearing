@@ -123,3 +123,9 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
 - 2026-11-03: Windows and doors are as wide as you draw them (0.5 m and up) instead of a fixed opening in
   a 2 m panel. A window piece is glass with a slim frame, sill at 0.9 m and head at 2.1 m; a door is up to
   0.9 m wide. Weight, cost and wind area follow the real opening size.
+- 2026-11-03: A run of window is one continuous opening of any length. Where window panels meet there is
+  no post and no diagonal strut (glass carries nothing), so the wall above must span the gap: unreinforced
+  brick manages about 2 m, a timber or steel beam along the top about 4 m, concrete 6 m, beyond that use
+  columns. A beam over the opening acts as a lintel (the wall strip above it is pinned, so it rides on the
+  beam instead of cracking in bending). Windows from old 2 m saves are marked `framed` and keep their
+  posts, so presets are unchanged.

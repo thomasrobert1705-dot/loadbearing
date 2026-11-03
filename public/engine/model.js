@@ -46,7 +46,8 @@ export function upgradeDesign(d) {
       const n = (Math.abs(p.i2 - p.i1) + Math.abs(p.j2 - p.j1)) * f;
       for (let k = 0; k < n; k++) {
         const i = p.i1 * f + di * k, j = p.j1 * f + dj * k;
-        add({ ...p, i1: i, j1: j, i2: i + di, j2: j + dj });
+        // An old 2 m window was a framed opening, not part of a continuous strip of glass.
+        add({ ...p, i1: i, j1: j, i2: i + di, j2: j + dj, ...(p.type === 'window' ? { framed: true } : {}) });
       }
     }
   }
@@ -195,7 +196,11 @@ export function buildModel(design, loads = {}) {
     const out = [];
     for (const sg of segs) {
       const n = sg.length, m = Math.ceil(n / MAXU);
-      for (let k = 0; k < m; k++) out.push(sg.slice(Math.round((k * n) / m), Math.round(((k + 1) * n) / m)));
+      for (let k = 0; k < m; k++) {
+        const c = sg.slice(Math.round((k * n) / m), Math.round(((k + 1) * n) / m));
+        c.joinL = k > 0; c.joinR = k < m - 1;   // continues straight into the next chunk (no column or cross wall)
+        out.push(c);
+      }
     }
     return out;
   }
@@ -233,6 +238,7 @@ export function buildModel(design, loads = {}) {
   }
 
   // Walls, window walls and door walls.
+  const beamAt = new Set(beamEdges.map((it) => `${it.p.s}|${it.o}|${it.line}|${it.pos}`));
   const wallEdges = live.filter((p) => PANEL_TYPES.has(p.type) && isUnitEdge(p)).map(edgeInfo);
   for (const run of runsOf(wallEdges, (it) => `${it.p.s}|${it.o}|${it.line}|${it.p.type}|${it.p.mat}`)) {
     for (const g of chunks(run)) wallPanel(g);
@@ -251,21 +257,34 @@ export function buildModel(design, loads = {}) {
     const dSec = { A: PANEL.strutFactor * PANEL.strutScale[type] * diag * t };
     const o2 = { mat: p0.mat, piece: p0.id };
     const bottom = elem(a0, b0, { ...o2, sec: hSec, role: 'wall edge', vy: [0, 1, 0], buckle: false });
-    const top = elem(a1, b1, { ...o2, sec: hSec, role: 'wall edge', vy: [0, 1, 0], buckle: false });
-    const left = elem(a0, a1, { ...o2, sec: vSec, role: 'wall edge', vy: dir, buckle: false });
-    const right = elem(b0, b1, { ...o2, sec: vSec, role: 'wall edge', vy: dir, buckle: false });
-    const d1 = elem(a0, b1, { ...o2, sec: dSec, truss: true, role: 'wall shear strut' });
-    const d2 = elem(b0, a1, { ...o2, sec: dSec, truss: true, role: 'wall shear strut' });
-    const all = [bottom, top, left, right, d1, d2];
+    // Over a long window the wall above can only span the gap itself, unless a beam (a lintel) runs along
+    // the top: then the wall rests on the beam and the strip carries no bending of its own.
+    const lintel = type === 'window' && !g.some((it) => it.p.framed) && (g.joinL || g.joinR) &&
+      g.every((it) => beamAt.has(`${p0.s}|${o}|${line}|${it.pos}`));
+    const top = elem(a1, b1, { ...o2, sec: hSec, role: 'wall edge', vy: [0, 1, 0], buckle: false, ...(lintel ? { truss: true } : {}) });
+    // A long window is one continuous opening: where two window panels meet there is only glass, which
+    // carries nothing. No post, no diagonal strut, so the wall strip above has to span the whole opening
+    // (or a beam or columns must hold it up).
+    const ribbon = type === 'window' && !g.some((it) => it.p.framed);
+    const joinL = ribbon && g.joinL, joinR = ribbon && g.joinR;
+    const side = (p, q) => elem(p, q, { ...o2, sec: vSec, role: 'wall edge', vy: dir, buckle: false });
+    const left = joinL ? null : side(a0, a1), right = joinR ? null : side(b0, b1);
+    const struts = joinL || joinR ? [] : [
+      elem(a0, b1, { ...o2, sec: dSec, truss: true, role: 'wall shear strut' }),
+      elem(b0, a1, { ...o2, sec: dSec, truss: true, role: 'wall shear strut' })];
+    const sides = [left, right].filter((e) => e !== null);
+    const all = [bottom, top, ...sides, ...struts];
+    const rule = sides.length === 2 ? { ids: sides, k: 2 } : { ids: [...sides, top], k: sides.length + 1 };
 
     // Openings are sized to the panel you drew: a window fills its width less a slim frame (sill at
     // 0.9 m, head at 2.1 m); a door is up to 0.9 m wide and 2.1 m high.
     const frame = Math.min(0.08, w * 0.1);
     let rects, open = 0;
     if (type === 'window') {
-      const g0 = frame / w, g1 = 1 - g0, s0 = 0.9 / STOREY, s1 = 2.1 / STOREY;
-      rects = [[0, 1, 0, s0, 'mat', t], [0, 1, s1, 1, 'mat', t], [0, g0, s0, s1, 'mat', t], [g1, 1, s0, s1, 'mat', t],
-        [g0, g1, s0, s1, 'glass', 0.02]];
+      const g0 = joinL ? 0 : frame / w, g1 = joinR ? 1 : 1 - frame / w, s0 = 0.9 / STOREY, s1 = 2.1 / STOREY;
+      rects = [[0, 1, 0, s0, 'mat', t], [0, 1, s1, 1, 'mat', t], [g0, g1, s0, s1, 'glass', 0.02]];
+      if (g0 > 0) rects.push([0, g0, s0, s1, 'mat', t]);
+      if (g1 < 1) rects.push([g1, 1, s0, s1, 'mat', t]);
       open = (g1 - g0) * (s1 - s0);
     } else if (type === 'door') {
       const dw = Math.min(0.9, w - 2 * frame) / w, du = (1 - dw) * 0.4, top = 2.1 / STOREY;
@@ -282,7 +301,7 @@ export function buildModel(design, loads = {}) {
     g.forEach((it, k) => {
       const prims = clip(rects, k / n, (k + 1) / n).map(([u0, u1, v0, v1, look, thick]) => ({ t: 'quad', c, uv: [u0, u1, v0, v1], thick, look }));
       parts.push({ piece: it.p.id, mat: p0.mat, nodes: c, elems: all, share: 1 / n,
-        rules: [{ ids: [left, right], k: 2 }], prims, extraMass: W / G_ACC / n });
+        rules: [rule], prims, extraMass: W / G_ACC / n });
     });
     panels.push({ nodes: { a0, b0, a1, b1 }, p0: [x1, y0, z1], dir, n: [-dir[2], 0, dir[0]], w, h: STOREY });
   }
