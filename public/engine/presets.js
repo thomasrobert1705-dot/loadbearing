@@ -120,6 +120,84 @@ export const PRESETS = [
     },
   },
   {
+    id: 'tower', name: 'Little skyscraper',
+    blurb: 'Ten storeys, 30 m: a steel frame with glass curtain walls around a concrete lift core. The core is what keeps it up in wind.',
+    design() {
+      const b = builder();
+      const N = 10;
+      for (let s = 0; s < N; s++) {
+        b.gridColumns('steel', -1, -1, 2, 2, s);
+        for (let j = -1; j <= 2; j++) for (let i = -1; i < 2; i++) b.beam('steel', i, j, i + 1, j, s);
+        for (let i = -1; i <= 2; i++) for (let j = -1; j < 2; j++) b.beam('steel', i, j, i, j + 1, s);
+        b.slabs('concrete', -1, -1, 2, 2, s);
+        b.walls('glass', -1, -1, 2, 2, s, (k, side, n) => (s === 0 && side === 'S' && n === 0 ? 'door' : 'window'));
+        // Lift core: the middle bay, walled in concrete all the way up.
+        b.walls('concrete', 0, 0, 1, 1, s, (k, side) => (side === 'S' ? 'door' : 'wall'));
+      }
+      return { pieces: b.pieces, pointLoads: [] };
+    },
+  },
+  {
+    id: 'capedutch', name: 'Cape Dutch farmhouse',
+    blurb: 'Long, low brick farmhouse with a steep thatched roof and cross walls. Thick walls and small windows: fine in wind, nervous in a quake.',
+    design() {
+      const b = builder();
+      b.walls('brick', -4, -1, 4, 1, 0, (k, side, n) =>
+        side === 'S' && n === 0 ? 'door' : (side === 'S' || side === 'N') && n % 2 !== 0 ? 'window' : 'wall');
+      for (const i of [-2, 2]) { b.panel('wall', 'brick', i, -1, i, 0, 0); b.panel('door', 'brick', i, 0, i, 1, 0); }
+      b.roof('earth', -4, -1, 4, 1, 0, 'x', 45);
+      return { pieces: b.pieces, pointLoads: [] };
+    },
+  },
+  {
+    id: 'warehouse', name: 'Steel warehouse',
+    blurb: 'Steel columns and roof trusses, thin aluminium cladding, X-bracing in the end bays. Take a brace out and try the wind again.',
+    design() {
+      const b = builder();
+      for (let s = 0; s < 2; s++) {
+        for (let i = -3; i <= 3; i++) for (const j of [-2, 2]) b.column('steel', i, j, s);
+        for (const i of [-3, 3]) for (let j = -1; j <= 1; j++) b.column('steel', i, j, s);
+        b.perimeterBeams('steel', -3, -2, 3, 2, s);
+        for (let i = -3; i < 3; i++) for (const j of [-2, 2]) {
+          const brace = (i === -3 || i === 2) && s === 0;
+          b.panel(brace ? 'brace' : s === 0 && j === -2 && i === 0 ? 'door' : 'wall', brace ? 'steel' : 'aluminium', i, j, i + 1, j, s);
+        }
+        for (const i of [-3, 3]) for (let j = -2; j < 2; j++) {
+          const brace = (j === -2 || j === 1) && s === 0;
+          b.panel(brace ? 'brace' : 'wall', brace ? 'steel' : 'aluminium', i, j, i, j + 1, s);
+        }
+      }
+      b.roof('steel', -3, -2, 3, 2, 1, 'x', 15);
+      return { pieces: b.pieces, pointLoads: [] };
+    },
+  },
+  {
+    id: 'chapel', name: 'Sandstone chapel',
+    blurb: 'Two-storey-high sandstone nave with no floor between, under a steep slate roof. Heavy stone is great in compression and hopeless in tension.',
+    design() {
+      const b = builder();
+      for (let s = 0; s < 2; s++) {
+        b.walls('stone', -1, -3, 1, 3, s, (k, side, n) =>
+          s === 0 && side === 'S' && n === -1 ? 'door' : s === 1 && (side === 'E' || side === 'W') && n % 2 === 0 ? 'window' : 'wall');
+      }
+      b.roof('stone', -1, -3, 1, 3, 1, 'z', 50);
+      return { pieces: b.pieces, pointLoads: [] };
+    },
+  },
+  {
+    id: 'pavilion', name: 'Glass pavilion',
+    blurb: 'Structural-glass walls under a flat glulam roof, on a concrete slab. Surprisingly tough: stiff glass walls are great shear walls. Find what breaks it.',
+    design() {
+      const b = builder();
+      b.slabs('concrete', -2, -2, 2, 2, -1);
+      b.walls('glass', -2, -2, 2, 2, 0, (k, side, n) => (side === 'S' && n === 0 ? 'door' : 'wall'));
+      b.perimeterBeams('glulam', -2, -2, 2, 2, 0);
+      for (let i = -1; i <= 1; i++) for (let j = -2; j < 2; j++) b.beam('glulam', i, j, i, j + 1, 0);
+      b.slabs('glulam', -2, -2, 2, 2, 0);
+      return { pieces: b.pieces, pointLoads: [] };
+    },
+  },
+  {
     id: 'empty', name: 'Empty plot', blurb: 'Start from scratch.',
     design() { return { pieces: [], pointLoads: [] }; },
   },

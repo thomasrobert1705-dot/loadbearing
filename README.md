@@ -54,7 +54,7 @@ The game opens in Inspect mode so the complete house is visible; select a build 
 | `materials.js` | E, density, strengths, sections, rough rand costs for the 11 materials |
 | `model.js` | design → structural panels → nodes, 3D frame elements, load vectors (dead `FD`, test `FT`), render parts |
 | `solver.js` | direct stiffness method, member checks, progressive collapse |
-| `presets.js` | the sample houses |
+| `presets.js` | the sample buildings (11, from a rammed-earth cottage to a ten-storey tower) |
 | `challenges.js` | challenge briefs, load cases and star scoring |
 
 - **Fine grid, coarse structure:** you build on a 0.5 m grid, but the analysis merges runs of the same
@@ -133,3 +133,6 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
   friction, so a wall still on its footing pivots about its base. Bodies start toppling the way the loads
   were pushing (downwind, the way the ground was swinging, or the structure's own sway) and break into
   their panels when they hit the ground hard. No body-to-body collisions: rubble can overlap.
+- 2026-11-03: Five more presets (little skyscraper, Cape Dutch farmhouse, steel warehouse, sandstone chapel,
+  glass pavilion), each with a different weak spot. Storey limit raised from 6 to 12 for the tower. Inspect
+  no longer fades the storeys above the working level, so a loaded building shows whole.

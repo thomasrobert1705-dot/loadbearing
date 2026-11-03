@@ -9,7 +9,7 @@ const $ = (s) => document.querySelector(s);
 const fmtCache = {};
 const fmt = (v, d = 0) => (fmtCache[d] ??= new Intl.NumberFormat('en-ZA', { minimumFractionDigits: d, maximumFractionDigits: d })).format(v);
 const rand = () => Math.random().toString(36).slice(2);
-const MAX_STOREYS = 6;
+const MAX_STOREYS = 12;
 const STORE_KEY = 'loadbearing.v1';
 
 // ---------------------------------------------------------------------------------------------
@@ -175,7 +175,8 @@ function utilColor(u) {
 }
 
 function isFaded(piece) {
-  if (!state.fadeAbove || state.mode !== 'build' || !piece) return false;
+  // Fading helps you see where you're placing; when just looking (Inspect), show the whole building.
+  if (!state.fadeAbove || state.mode !== 'build' || state.tool === 'inspect' || !piece) return false;
   if (piece.s > state.storey) return true;
   if (piece.type === 'roof' && piece.s >= state.storey && !['roof', 'inspect', 'erase'].includes(state.tool)) return true;
   return false;
