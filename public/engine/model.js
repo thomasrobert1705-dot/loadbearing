@@ -258,22 +258,26 @@ export function buildModel(design, loads = {}) {
     const d2 = elem(b0, a1, { ...o2, sec: dSec, truss: true, role: 'wall shear strut' });
     const all = [bottom, top, left, right, d1, d2];
 
-    const open = PANEL.opening[type];
+    // Openings are sized to the panel you drew: a window fills its width less a slim frame (sill at
+    // 0.9 m, head at 2.1 m); a door is up to 0.9 m wide and 2.1 m high.
+    const frame = Math.min(0.08, w * 0.1);
+    let rects, open = 0;
+    if (type === 'window') {
+      const g0 = frame / w, g1 = 1 - g0, s0 = 0.9 / STOREY, s1 = 2.1 / STOREY;
+      rects = [[0, 1, 0, s0, 'mat', t], [0, 1, s1, 1, 'mat', t], [0, g0, s0, s1, 'mat', t], [g1, 1, s0, s1, 'mat', t],
+        [g0, g1, s0, s1, 'glass', 0.02]];
+      open = (g1 - g0) * (s1 - s0);
+    } else if (type === 'door') {
+      const dw = Math.min(0.9, w - 2 * frame) / w, du = (1 - dw) * 0.4, top = 2.1 / STOREY;
+      rects = [[0, 1, top, 1, 'mat', t], [0, du, 0, top, 'mat', t], [du + dw, 1, 0, top, 'mat', t], [du, du + dw, 0, top, 'door', 0.045]];
+      open = dw * top;
+    } else rects = [[0, 1, 0, 1, 'mat', t]];
     const area = w * STOREY;
     const W = area * (1 - open) * t * m.rho * G_ACC + area * open * PANEL.glazingKPa * 1000;
     for (const nd of [a0, b0, a1, b1]) addF(nd, 'fD', [0, -W / 4, 0]);
     cost += area * (1 - open) * t * m.cost + (type === 'window' ? area * open * PANEL.glazingCost : 0) +
       (type === 'door' ? PANEL.doorCost : 0);
 
-    // The panel's look in (u along the wall, v up) coordinates, then sliced per piece.
-    let rects;
-    if (type === 'window') {
-      rects = [[0, 1, 0, 0.33, 'mat', t], [0, 1, 0.8, 1, 'mat', t], [0, 0.25, 0.33, 0.8, 'mat', t], [0.75, 1, 0.33, 0.8, 'mat', t],
-        [0.25, 0.75, 0.33, 0.8, 'glass', 0.02]];
-    } else if (type === 'door') {
-      const dw = Math.min(0.9, 0.8 * w) / w, du = (1 - dw) * 0.4;
-      rects = [[0, 1, 0.72, 1, 'mat', t], [0, du, 0, 0.72, 'mat', t], [du + dw, 1, 0, 0.72, 'mat', t], [du, du + dw, 0, 0.72, 'door', 0.045]];
-    } else rects = [[0, 1, 0, 1, 'mat', t]];
     const c = [a0, b0, b1, a1];
     g.forEach((it, k) => {
       const prims = clip(rects, k / n, (k + 1) / n).map(([u0, u1, v0, v1, look, thick]) => ({ t: 'quad', c, uv: [u0, u1, v0, v1], thick, look }));

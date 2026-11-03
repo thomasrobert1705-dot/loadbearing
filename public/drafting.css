@@ -1,0 +1,178 @@
+/* Presentation only: drafting-paper treatment for the existing interface panels. */
+:is(#side, .project-stats, .view-controls, #status, #results, #timeline, #hint, #tip, #busy, #challengeBar, dialog) {
+  --bg: #f4f1e7;
+  --panel: #faf7ed;
+  --ink: #283e4c;
+  --muted: #5e707a;
+  --line: #adb9b8;
+  --accent: #315d72;
+  --accent-ink: #faf7ed;
+  --good: #31674b;
+  --warn: #896011;
+  --bad: #ab4034;
+  --chip: #faf7ed;
+  --radius: 2px;
+  --shadow: 3px 4px 0 #283e4c16, 0 8px 20px #283e4c0d;
+  --draft-font: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  color: var(--ink);
+  color-scheme: light;
+  background-color: var(--panel);
+  background-image:
+    linear-gradient(#557e9310 1px, transparent 1px),
+    linear-gradient(90deg, #557e9310 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+#side {
+  border-color: #8b9da3;
+  box-shadow: inset -5px 0 0 #faf7ed, inset -6px 0 0 #adb9b870;
+  scrollbar-color: #9dadae #f4f1e7;
+}
+#side .workspace-heading {
+  font-family: var(--draft-font);
+  color: var(--ink);
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  padding: 8px 0;
+  letter-spacing: 1px;
+}
+#side .workspace-heading span:last-child { color: var(--muted); }
+#side h2 {
+  color: var(--ink);
+  font-family: var(--draft-font);
+  letter-spacing: .8px;
+  border-bottom: 1px solid #7d939c;
+  padding-bottom: 6px;
+}
+#side h2 span { color: var(--muted); letter-spacing: .5px; }
+
+/* Fine line weights and inset frames echo a technical drawing's title block. */
+:is(#side, #timeline, #challengeBar, dialog) :is(button, .btn, select, input[type=number]) {
+  color: var(--ink);
+  background-color: #faf7edf2;
+  border: 1px solid #9baeb5;
+  border-radius: 2px;
+  box-shadow: none;
+}
+:is(#side, #timeline, #challengeBar, dialog) :is(button, .btn, select):hover {
+  color: #244c62;
+  background-color: #e9efec;
+  border-color: #315d72;
+}
+:is(#side, #timeline, #challengeBar, dialog) button:disabled {
+  opacity: .45;
+  background-color: #f4f1e7;
+  border-color: #adb9b8;
+}
+#side .seg {
+  background: #ebece3;
+  border: 1px solid #8b9da3;
+  border-radius: 2px;
+}
+#side .seg button { border-color: transparent; background: transparent; }
+#side .seg button.on {
+  color: #faf7ed;
+  background: #31576a;
+  border-color: #31576a;
+  box-shadow: inset 0 0 0 2px #31576a, inset 0 0 0 3px #faf7ed55;
+}
+#side .tools button {
+  color: #3c5664;
+  background: #faf7edeb;
+  border-color: #a4b4b8;
+}
+#side .tools button svg { stroke-width: 1.25; }
+#side .tools button kbd {
+  color: #5e707a;
+  font-family: var(--draft-font);
+  border-bottom: 1px solid #adb9b8;
+  line-height: 1.3;
+}
+#side .tools button.on, #side .mats button.on, #side .ch-card.on {
+  color: #234f65;
+  border-color: #315d72;
+  background-color: #e6eeea;
+  background-image: repeating-linear-gradient(135deg, transparent 0 7px, #315d720d 7px 8px);
+  box-shadow: inset 0 0 0 2px #faf7ed, inset 0 0 0 3px #315d7259;
+}
+#side .tools button:hover, #side .mats button:hover { border-color: #315d72; background-color: #e6eeea; }
+#side .mats button i {
+  border-radius: 1px;
+  outline: 1px solid #687b8266;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+#matInfo {
+  background: #f4f1e7;
+  color: #546873;
+  border-left: 2px solid #7b919b;
+  border-top: 1px dashed #adb9b8;
+  border-bottom: 1px dashed #adb9b8;
+}
+#side :is(.storey, .sub, .slider, .pl-list li, .ch-card) {
+  background: #faf7edeb;
+  border: 1px solid #adb9b8;
+  border-radius: 2px;
+  color: var(--ink);
+}
+#side .storey { font-family: var(--draft-font); }
+#side .storey button { background: #e9ece3; }
+#side .check, #side .foot { color: #536871; }
+#side .foot { border-top: 1px solid #8b9da3; }
+#side .live-dot { background: #416e55; }
+#side .foot button, #side button.ghost { background: transparent; border-color: transparent; color: #536871; }
+:is(#side, #challengeBar, dialog) button.primary, #side button.toggle.on {
+  color: #faf7ed;
+  background: #31576a;
+  border-color: #31576a;
+  box-shadow: inset 0 0 0 2px #31576a, inset 0 0 0 3px #faf7ed55;
+}
+:is(#side, #challengeBar, dialog) button.primary:hover, #side button.toggle.on:hover { background: #24485c; color: #fffdf5; }
+#side .ch-stars, #results .ch-stars { color: #896011; }
+#side .ch-stars .off, #results .ch-stars .off { color: #a8b3b4; }
+#side .slider output, #side .row output { font-family: var(--draft-font); }
+#side .legend i { border-radius: 0; outline: 1px solid #889aa155; outline-offset: 2px; }
+
+/* Floating panels resemble separate sheets laid across the drawing board. */
+:is(.project-stats, .view-controls, #status, #results, #timeline, #hint, #tip, #busy, #challengeBar, dialog) {
+  border: 1px solid #859ba5;
+  border-radius: 2px;
+  box-shadow: var(--shadow);
+  backdrop-filter: none;
+}
+.project-stats {
+  outline: 1px solid #859ba55c;
+  outline-offset: -5px;
+}
+.project-stats .eyebrow {
+  font-family: var(--draft-font);
+  color: #3c5969;
+  letter-spacing: 1px;
+  border-bottom: 2px solid #6c8692;
+  padding-bottom: 9px;
+}
+.project-stats .stats { font-family: var(--draft-font); }
+.project-stats .stats dt { color: #5e707a; }
+.project-stats .stats dd { color: #283e4c; }
+.project-stats .stats dt:last-of-type, .project-stats .stats dd:last-child { border-color: #9badb3; }
+.view-controls button {
+  color: #3c5969;
+  font-family: var(--draft-font);
+  border-radius: 1px;
+}
+.view-controls button.on { color: #faf7ed; background: #31576a; }
+.view-controls button:hover { color: #244c62; background: #e1e9e6; }
+.view-controls > span { background: #adb9b8; }
+#hint { color: #536871; }
+#results h3, #tip b, #challengeBar .ch-title, dialog h2 {
+  font-family: var(--draft-font);
+  letter-spacing: -.5px;
+}
+#results .kv { border-top-style: double; border-top-width: 3px; }
+#timeline button { border-radius: 2px; }
+#tlLabel { font-family: var(--draft-font); }
+#tip .bar, #tip .bar i { border-radius: 0; }
+:is(#side, .view-controls, #timeline, #challengeBar, dialog) :is(button, .btn, select, input):focus-visible {
+  outline: 2px solid #315d72;
+  outline-offset: 3px;
+}

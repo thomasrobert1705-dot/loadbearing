@@ -123,7 +123,6 @@ export const PANEL = {
   sideWidth: 0.4,      // half-width strip at each vertical edge (adjacent panels add to a full strip)
   strutFactor: 0.15,   // diagonal strut width as a fraction of the diagonal length
   slabStrip: 0.5,      // width of slab acting as the edge "beam" (each side of a shared edge)
-  opening: { wall: 0, window: 0.3, door: 0.35 },          // fraction of panel area that is a hole
   strutScale: { wall: 1, window: 0.2, door: 0.1 },        // openings interrupt the diagonal strut
   glazingKPa: 0.3,
   glazingCost: 1800,   // R / m²

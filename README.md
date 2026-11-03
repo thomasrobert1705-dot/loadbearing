@@ -120,3 +120,6 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
 - 2026-11-03: Challenges test wind and quakes from 0° and 90° so a one-way-braced build can't pass. Budgets
   were set so a sensible build gets ★★ and ★★★ takes a cheaper idea (`test/solver.test.mjs` checks one
   winning build per hazard and that unreinforced brick with openings fails Tulbagh).
+- 2026-11-03: Windows and doors are as wide as you draw them (0.5 m and up) instead of a fixed opening in
+  a 2 m panel. A window piece is glass with a slim frame, sill at 0.9 m and head at 2.1 m; a door is up to
+  0.9 m wide. Weight, cost and wind area follow the real opening size.
