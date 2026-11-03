@@ -32,6 +32,16 @@ const MODE_TEXT = ['fine', 'pulled apart (tension)', 'crushed', 'buckled', 'crac
 const MODE_SHORT = ['', 'tension', 'crushing', 'buckling', 'bending', 'shear', 'instability', 'uplift'];
 const storeyName = (s) => (s === 0 ? 'ground floor' : `${s}${['st', 'nd', 'rd'][s - 1] || 'th'} floor`);
 const pieceStoreyLabel = (p) => (p.type === 'slab' ? (p.s < 0 ? 'ground slab' : `floor of ${storeyName(p.s + 1)}`) : p.type === 'beam' ? `top of ${storeyName(p.s)}` : p.type === 'roof' ? `on ${storeyName(p.s)}` : storeyName(p.s));
+// "9 m of window wall", "4 m² of floor", "3 columns": how much of a kind of piece there is.
+const LINEAR_TYPES = new Set(['wall', 'window', 'door', 'beam', 'brace']);
+const qtyFmt = (v) => fmt(v, Number.isInteger(v) ? 0 : Number.isInteger(v * 10) ? 1 : 2);
+function amountOf(type, n) {
+  const name = TYPE_NAMES[type].toLowerCase();
+  if (LINEAR_TYPES.has(type)) return `${qtyFmt(n * CELL)} m of ${name}`;
+  if (type === 'slab') return `${qtyFmt(n * CELL * CELL)} m² of floor`;
+  if (type === 'roof') return n > 1 ? `${n} roofs` : 'roof';
+  return n > 1 ? `${n} ${name}s` : name;
+}
 const compass = (deg) => ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'][Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
 const SCENARIOS = [
@@ -659,22 +669,30 @@ function showResults() {
   if (!T.push && S.firstDamage && S.failedCount) lead += ` First failure at ${fmt(S.firstDamage.lam * 100)}% of the loads: ${describeElem(S.firstDamage)}.`;
 
   // One line per piece per load level: what broke in it, and whether (some of) it fell.
+  const elemPieces = new Map();
+  for (const part of state.model.parts) for (const e of part.elems) {
+    if (!elemPieces.has(e)) elemPieces.set(e, new Set());
+    elemPieces.get(e).add(part.piece);
+  }
   const events = [];
   let group = null;
   const flush = () => {
     if (!group) return;
-    // Identical lines (e.g. nine columns all cracking the same way) collapse into one with a count.
+    // Identical lines (e.g. a whole wall of 0.5 m pieces cracking the same way) collapse into
+    // one, with the amount given as a length, an area or a count.
     const lines = new Map();
     for (const [pid, v] of group.byPiece) {
       const p = pieces.get(pid);
       if (!p) continue;
       const modes = [...v.modes].filter(Boolean).map((m) => MODE_TEXT[m]);
       const how = [modes.join(', '), v.fell ? (p.type === 'roof' ? 'parts came off' : 'fell') : ''].filter(Boolean).join(' → ');
-      const text = `${TYPE_NAMES[p.type]} (${matName(p)}, ${pieceStoreyLabel(p)}): ${how || 'damaged'}`;
-      lines.set(text, (lines.get(text) || 0) + 1);
+      const key = `${p.type}|${matName(p)}|${pieceStoreyLabel(p)}|${how || 'damaged'}`;
+      lines.set(key, (lines.get(key) || 0) + 1);
     }
-    for (const [text, n] of lines) {
-      events.push({ k: group.k, html: `<b>${T.push ? fmt(group.lam, 2) + '×' : fmt(group.lam * 100) + '%'}</b> ${n > 1 ? `${n} × ` : ''}${text}` });
+    for (const [key, n] of lines) {
+      const [type, mat, where, how] = key.split('|');
+      const what = amountOf(type, n);
+      events.push({ k: group.k, html: `<b>${T.push ? fmt(group.lam, 2) + '×' : fmt(group.lam * 100) + '%'}</b> ${what.replace(/^./, (c) => c.toUpperCase())} (${mat}, ${where}): ${how}` });
     }
     group = null;
   };
@@ -685,7 +703,10 @@ function showResults() {
       if (!group.byPiece.has(pid)) group.byPiece.set(pid, { modes: new Set(), fell: false });
       return group.byPiece.get(pid);
     };
-    f.failed.forEach((e, n) => get(state.model.elems[e].piece).modes.add(f.failedModes?.[n] || 0));
+    // A broken member belongs to a whole panel, so every piece in that panel shares the damage.
+    f.failed.forEach((e, n) => {
+      for (const pid of elemPieces.get(e) || [state.model.elems[e].piece]) get(pid).modes.add(f.failedModes?.[n] || 0);
+    });
     for (const p of f.fell) get(state.model.parts[p].piece).fell = true;
   });
   flush();
@@ -728,7 +749,15 @@ function updateStatus() {
   const S = { ...c.summary };
   // The solver counts parts; tell the player about whole pieces.
   S.unsupported = new Set(c.frames[0].fell.map((p) => state.model.parts[p]?.piece)).size;
-  if (S.unsupported) el.innerHTML = `<b class="bad">⚠ ${S.unsupported} piece${S.unsupported > 1 ? 's have' : ' has'} nothing holding ${S.unsupported > 1 ? 'them' : 'it'} up</b> (glowing red). Everything needs a path down to the ground.`;
+  if (S.unsupported) {
+    const byType = new Map();
+    for (const pid of new Set(c.frames[0].fell.map((p) => state.model.parts[p]?.piece))) {
+      const t = pieces.get(pid)?.type;
+      if (t) byType.set(t, (byType.get(t) || 0) + 1);
+    }
+    const what = [...byType].map(([t, n]) => amountOf(t, n)).join(', ');
+    el.innerHTML = `<b class="bad">⚠ Nothing is holding up ${what}</b> (glowing red). Everything needs a path down to the ground.`;
+  }
   else if (S.failedCount) el.innerHTML = `<b class="bad">✗ Fails under its own weight.</b> ${describeElem(S.firstDamage)}.`;
   else if (S.worst) el.innerHTML = `<b class="good">✓ Stands under its own weight</b> · hardest-working: ${fmt(S.worst.util * 100)}% (${MATERIALS[S.worst.mat].name.toLowerCase()} ${S.worst.role})`;
   else el.innerHTML = '';
