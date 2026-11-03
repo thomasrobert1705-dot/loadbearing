@@ -22,6 +22,7 @@ import { POISSON, G_ACC } from './materials.js';
 
 const MODES = ['ok', 'tension', 'crushing', 'buckling', 'bending', 'shear', 'unstable', 'uplift'];
 export { MODES };
+const MAX_SHOWN_DISP = 0.5; // m: past the 0.4 m instability limit, so anything moving this far is failing
 
 export class Structure {
   constructor(model) {
@@ -320,7 +321,12 @@ export class Structure {
       for (let i = 0; i < this.nn; i++) {
         if (seen[i]) {
           for (let d = 0; d < 3; d++) U[i * 3 + d] = sol.uD[i * 6 + d] + lam * sol.uT[i * 6 + d];
-          maxDisp = Math.max(maxDisp, Math.hypot(U[i * 3], U[i * 3 + 1], U[i * 3 + 2]));
+          const disp = Math.hypot(U[i * 3], U[i * 3 + 1], U[i * 3 + 2]);
+          // Just after something breaks, a piece can briefly be a mechanism and the linear solve
+          // says it moved kilometres. Its members fail the instability check (0.4 m) and it falls
+          // in the next step; until then, hold it where it last was instead of drawing a spike.
+          if (disp > MAX_SHOWN_DISP) for (let d = 0; d < 3; d++) U[i * 3 + d] = lastU[i * 3 + d];
+          else maxDisp = Math.max(maxDisp, disp);
         } else {
           for (let d = 0; d < 3; d++) U[i * 3 + d] = lastU[i * 3 + d];
         }

@@ -215,11 +215,19 @@ export class Scene3D {
 
   // Place every live part using node positions base + U·scale.
   deform(U, scale, shake = 1, U0 = null) {
+    // Exaggeration is tuned to the small elastic movements, so the big movements just before
+    // something gives way would be drawn tens of metres long. Soft cap: small offsets are
+    // unchanged, large ones level off at DRAW_CAP metres.
+    const DRAW_CAP = 1;
     const pos = (id) => {
       const b = this.base[id];
       if (!U) return b;
-      if (U0) return [0, 1, 2].map((d) => b[d] + (U0[id * 3 + d] + (U[id * 3 + d] - U0[id * 3 + d]) * shake) * scale);
-      return [b[0] + U[id * 3] * scale, b[1] + U[id * 3 + 1] * scale, b[2] + U[id * 3 + 2] * scale];
+      const o = U0
+        ? [0, 1, 2].map((d) => (U0[id * 3 + d] + (U[id * 3 + d] - U0[id * 3 + d]) * shake) * scale)
+        : [U[id * 3] * scale, U[id * 3 + 1] * scale, U[id * 3 + 2] * scale];
+      const m = Math.hypot(o[0], o[1], o[2]);
+      const k = m > 1e-9 ? (DRAW_CAP * Math.tanh(m / DRAW_CAP)) / m : 1;
+      return [b[0] + o[0] * k, b[1] + o[1] * k, b[2] + o[2] * k];
     };
     this.posFn = pos;
     for (const p of this.parts) {
