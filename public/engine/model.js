@@ -14,6 +14,7 @@
 //   floor slab     – four edge strips carrying the floor load in bending, plus two diagonals
 //                    so the floor acts as a stiff diaphragm that ties the walls together.
 //   gable roof     – rafters, ridge beam, eave beams, ceiling ties and slope bracing.
+//   hip roof       – the same, plus four hip rafters; all four sides slope.
 //   cross bracing  – two pinned diagonals plus top and bottom chords.
 
 import { MATERIALS, CELL, STOREY, G_ACC, PANEL, rect } from './materials.js';
@@ -360,6 +361,7 @@ export function buildModel(design, loads = {}) {
     ];
     const cells = [];
     for (let x = 0; x < w; x++) for (let z = 0; z < h; z++) cells.push([x, z, cell(I + x, J + z)]);
+    // (A ground slab, s = −1, is drawn sitting on the ground; upper floors hang below their level.)
     // Area loads go round the four edges as an even line load (N per metre).
     const perM = (WX * WZ) / (2 * (WX + WZ));
     const expFrac = cells.filter(([x, z]) => exposed(I + x, J + z, s)).length / cells.length;
@@ -372,11 +374,11 @@ export function buildModel(design, loads = {}) {
       cost += CELL * CELL * t * m.cost;
       parts.push({ piece: q.id, mat: p0.mat, nodes: quad, elems: [...edges, ...diags], share: 1 / cells.length,
         rules: [{ ids: edges, k: 2 }],
-        prims: [{ t: 'quad', c: quad, uv: [x / w, (x + 1) / w, z / h, (z + 1) / h], thick: t, offset: -t / 2, look: 'mat', horizontal: true }] });
+        prims: [{ t: 'quad', c: quad, uv: [x / w, (x + 1) / w, z / h, (z + 1) / h], thick: t, offset: s < 0 ? t / 2 : -t / 2, look: 'mat', horizontal: true }] });
     }
   }
 
-  for (const p of live) if (p.type === 'roof') buildRoof(p, MATERIALS[p.mat]);
+  for (const p of live) if (p.type === 'roof') (p.style === 'hip' ? buildHipRoof : buildRoof)(p, MATERIALS[p.mat]);
 
   function buildRoof(p, m) {
     const pid = p.id;
@@ -478,7 +480,12 @@ export function buildModel(design, loads = {}) {
         prims: [{ t: 'bar', a: rg[k], b: rg[k + 1], w: sec.b, h: sec.h, vy: [0, 1, 0], round }] });
     }
 
-    // Gable-end infill triangles (visual + weight, carried by the end rafters).
+    // Gable-end infill triangles (visual + weight, carried by the end rafters). In wind they act
+    // like the wall below them: pressure on the windward gable, suction on the leeward one, both
+    // pushing the top of the end walls over. Hip roofs don't have them, which is a big part of
+    // why hip roofs ride out storms better.
+    const qGable = 0.5 * 1.2 * L.wind ** 2;
+    const dWind = [Math.cos((L.windDir * Math.PI) / 180), 0, Math.sin((L.windDir * Math.PI) / 180)];
     for (const k of [0, us.length - 1]) {
       const area = half * rise;
       const W = area * 0.05 * m.rho * G_ACC;
@@ -486,7 +493,194 @@ export function buildModel(design, loads = {}) {
       cost += area * 0.05 * m.cost;
       parts.push({ piece: pid, mat: p.mat, nodes: [eA[k], eB[k], rg[k]], elems: [], rules: [{ ids: [rA[k], rB[k]], k: 1 }],
         prims: [{ t: 'tri', c: [eA[k], eB[k], rg[k]], thick: 0.05, look: 'mat' }] });
+      if (L.wind > 0) {
+        const s = k === 0 ? -1 : 1;
+        const nE = alongX ? [s, 0, 0] : [0, 0, s];
+        const c = nE[0] * dWind[0] + nE[2] * dWind[2];
+        if (Math.abs(c) >= 0.05) {
+          const F = qGable * (c < 0 ? 0.8 : 0.5) * Math.abs(c) * area;
+          for (const nd of [eA[k], eB[k], rg[k]]) addF(nd, 'fT', scale(nE, (Math.sign(c) * F) / 3));
+        }
+      }
     }
+  }
+
+  // Hip roof: all four sides slope. Four hip rafters run from the corners up to the ends of a
+  // shorter ridge (a pyramid if the plan is square), common rafters fill the long sides, and an
+  // end rafter runs up the middle of each hip end. Works in metres because the ridge ends can
+  // fall between grid lines; the joining pass below connects everything up.
+  function buildHipRoof(p, m) {
+    const pid = p.id;
+    const fmId = m.roofFrame || p.mat;
+    const fm = MATERIALS[fmId];
+    const top = (p.s + 1) * STOREY;
+    const alongX = p.axis !== 'z';
+    const [u0, u1, v0, v1] = alongX ? [p.i0, p.i1, p.j0, p.j1] : [p.j0, p.j1, p.i0, p.i1];
+    const U0 = u0 * CELL, U1 = u1 * CELL, V0 = v0 * CELL, V1 = v1 * CELL;
+    const world = (u, y, v) => (alongX ? [u, y, v] : [v, y, u]);
+    const nAt = (u, v, y = top) => { const [x, , z] = world(u, 0, v); return node(x, y, z); };
+    const half = (V1 - V0) / 2, Vm = (V0 + V1) / 2;
+    const pitch = ((p.pitch ?? 30) * Math.PI) / 180;
+    const rise = half * Math.tan(pitch);
+    let R0u = U0 + half, R1u = U1 - half;
+    if (R0u > R1u) R0u = R1u = (U0 + U1) / 2;
+    const sec = fm.beam, braceSec = { A: sec.A * 0.25 }, round = sec.kind === 'tube';
+    const o = { mat: fmId, piece: pid };
+    const bar = (a, b, extra = {}) => ({ t: 'bar', a, b, w: sec.b, h: sec.h, vy: [0, 1, 0], round, ...extra });
+    const lenOf = (a, b) => len(sub(P(b), P(a)));
+    const C = [nAt(U0, V0), nAt(U1, V0), nAt(U1, V1), nAt(U0, V1)];
+    const R0 = nAt(R0u, Vm, top + rise);
+    const R1 = R1u > R0u + 1e-9 ? nAt(R1u, Vm, top + rise) : R0;
+
+    // Common rafters at the ~2 m stations along the ridge (same spacing as a gable, so their feet
+    // land on wall-panel corners). The ridge ends are held up by the hips and end rafters.
+    const cu = stations(u0, u1).map((s) => s * CELL).filter((u) => u >= R0u - 1e-6 && u <= R1u + 1e-6);
+    const eA = cu.map((u) => nAt(u, V0)), eB = cu.map((u) => nAt(u, V1));
+    const rg = cu.map((u) => (Math.abs(u - R0u) < 1e-6 ? R0 : Math.abs(u - R1u) < 1e-6 ? R1 : nAt(u, Vm, top + rise)));
+    // Hip rafters carry two slopes, so they're doubled up (two rafters side by side), as built.
+    const hipSec = { ...sec, A: 2 * sec.A, Iy: 2 * sec.Iy, Iz: 2 * sec.Iz, J: 2 * sec.J, Sy: 2 * sec.Sy, Sz: 2 * sec.Sz, b: 1.6 * sec.b };
+    const rafter = (a, b, role, rs = sec) => {
+      const e = elem(a, b, { ...o, sec: rs, role, selfWeight: true, pinned: true, anchor: 1 });
+      cost += rs.A * lenOf(a, b) * fm.cost;
+      parts.push({ piece: pid, mat: fmId, nodes: [a, b], elems: [e], rules: [{ ids: [e], k: 1 }], prims: [bar(a, b, { w: rs.b })] });
+      return e;
+    };
+    const rA = cu.map((u, k) => rafter(eA[k], rg[k], 'rafter'));
+    const rB = cu.map((u, k) => rafter(eB[k], rg[k], 'rafter'));
+    const hip = [rafter(C[0], R0, 'hip rafter', hipSec), rafter(C[1], R1, 'hip rafter', hipSec),
+      rafter(C[2], R1, 'hip rafter', hipSec), rafter(C[3], R0, 'hip rafter', hipSec)];
+    // Hip ends: a fan of rafters from the ~2 m stations on the end wall up to the ridge end.
+    const vIn = stations(v0, v1).slice(1, -1).map((v) => v * CELL);
+    const fan = [U0, U1].map((Ue, k) => vIn.map((v) => {
+      const foot = nAt(Ue, v);
+      return { foot, v, e: rafter(foot, k ? R1 : R0, 'rafter') };
+    }));
+
+    // Eave beams round all four sides and the ridge: one member each, drawn in slices between joints.
+    const beamRun = (a, b, cuts, role) => {
+      const e = elem(a, b, { ...o, sec, role, selfWeight: true });
+      cost += sec.A * lenOf(a, b) * fm.cost;
+      const f = [0, ...cuts, 1];
+      for (let k = 0; k < f.length - 1; k++) {
+        if (f[k + 1] - f[k] < 1e-6) continue;
+        const ref = { seg: e, f0: f[k], f1: f[k + 1] };
+        parts.push({ piece: pid, mat: fmId, nodes: [a, b], elems: [ref], rules: [{ ids: [ref], k: 1 }], prims: [bar(a, b, { f: [f[k], f[k + 1]] })] });
+      }
+      return e;
+    };
+    const along = cu.map((u) => (u - U0) / (U1 - U0));
+    beamRun(C[0], C[1], along, 'eave beam');
+    beamRun(C[3], C[2], along, 'eave beam');
+    beamRun(C[0], C[3], [0.5], 'eave beam');
+    beamRun(C[1], C[2], [0.5], 'eave beam');
+    if (R1 !== R0) beamRun(R0, R1, cu.map((u) => (u - R0u) / (R1u - R0u)).filter((f) => f > 1e-6 && f < 1 - 1e-6), 'ridge beam');
+
+    // Ceiling ties: across the span at every common rafter (to stop its feet spreading) and at the
+    // ~2 m stations; plus one behind each end rafter, back to the ridge-end line.
+    const us = stations(u0, u1), vs = stations(v0, v1);
+    const tieSec = fm.beam;
+    const tieAt = us.slice(1, -1).map((u) => u * CELL);
+    // Behind each fan rafter, a tie back to the first ceiling-tie line stops its foot kicking out.
+    if (us.length > 2) fan.forEach((list, k) => {
+      const ui = (k ? us[us.length - 2] : us[1]) * CELL;
+      for (const { foot, v } of list) {
+        const inner = nAt(ui, v);
+        const te = elem(foot, inner, { ...o, sec: tieSec, role: 'ceiling tie', selfWeight: true, release: [true, false] });
+        cost += tieSec.A * lenOf(foot, inner) * fm.cost;
+        parts.push({ piece: pid, mat: fmId, nodes: [foot, inner], elems: [te], rules: [{ ids: [te], k: 1 }],
+          prims: [{ t: 'bar', a: foot, b: inner, w: tieSec.b * 0.6, h: tieSec.h * 0.6, vy: [0, 1, 0], round }] });
+      }
+    });
+    tieAt.forEach((uM, k) => {
+      const prev = k > 0 ? tieAt[k - 1] : U0, next = k < tieAt.length - 1 ? tieAt[k + 1] : U1;
+      const trib = (next - prev) / 2;
+      const a = nAt(uM, V0), b = nAt(uM, V1);
+      const te = elem(a, b, { ...o, sec: tieSec, role: 'ceiling tie', selfWeight: true, release: [true, true] });
+      addW(te, 'wD', [0, -0.25e3 * trib, 0]);
+      cost += tieSec.A * (V1 - V0) * fm.cost;
+      for (let q = 0; q < vs.length - 1; q++) {
+        const ref = { seg: te, f0: (vs[q] - v0) / (v1 - v0), f1: (vs[q + 1] - v0) / (v1 - v0) };
+        parts.push({ piece: pid, mat: fmId, nodes: [nAt(uM, vs[q] * CELL), nAt(uM, vs[q + 1] * CELL)], elems: [ref], rules: [{ ids: [ref], k: 1 }],
+          prims: [{ t: 'bar', a, b, f: [ref.f0, ref.f1], w: tieSec.b * 0.6, h: tieSec.h * 0.6, vy: [0, 1, 0], round }] });
+      }
+    });
+    const oo = { ...o, sec: { A: 0.003 }, truss: true, role: 'ceiling bracing' };
+    const cn = (u, v) => nAt(u * CELL, v * CELL);
+    for (let a = 0; a < us.length - 1; a++) for (let b = 0; b < vs.length - 1; b++) {
+      const [ua, ub, va, vb] = [us[a], us[a + 1], vs[b], vs[b + 1]];
+      if (b > 0) elem(cn(ua, va), cn(ub, va), oo);
+      elem(cn(ua, va), cn(ub, vb), oo);
+      elem(cn(ub, va), cn(ua, vb), oo);
+    }
+
+    // Covering: each slope's dead load, snow and wind suction is shared between the rafters that
+    // carry it (hips carry half from each of their two slopes).
+    const run0 = R0u - U0, run1 = U1 - R1u;
+    // Width of roof each common rafter carries (the outer ones also take half the hip zone).
+    // Plan area each rafter holds up. Long slopes: each common takes the strip halfway to its
+    // neighbours (the outer ones out to the ridge ends) and each hip takes the triangle between it
+    // and the eave. Hip ends: each rafter in the fan takes a wedge halfway to its neighbours.
+    const longPlan = (rr, hA, hB) => {
+      if (!cu.length) return [[hA, ((U1 - U0) + (R1u - R0u)) / 4 * half], [hB, ((U1 - U0) + (R1u - R0u)) / 4 * half]];
+      const out = cu.map((u, k) => [rr[k], ((k > 0 ? (u - cu[k - 1]) / 2 : u - R0u) + (k < cu.length - 1 ? (cu[k + 1] - u) / 2 : R1u - u)) * half]);
+      return [...out, [hA, (run0 * half) / 2], [hB, (run1 * half) / 2]];
+    };
+    const endPlan = (list, hA, hB, run) => {
+      const pts = [V0, ...list.map((f) => f.v), V1], raf = [hA, ...list.map((f) => f.e), hB];
+      return raf.map((e, j) => {
+        const lo = j > 0 ? (pts[j - 1] + pts[j]) / 2 : pts[0], hi = j < pts.length - 1 ? (pts[j] + pts[j + 1]) / 2 : pts[j];
+        return [e, ((hi - lo) * run) / 2];
+      });
+    };
+    const facets = [
+      { n: norm(world(0, half, -rise)), slope: Math.atan2(rise, half), raf: longPlan(rA, hip[0], hip[1]) },
+      { n: norm(world(0, half, rise)), slope: Math.atan2(rise, half), raf: longPlan(rB, hip[3], hip[2]) },
+      { n: norm(world(-rise, run0, 0)), slope: Math.atan2(rise, run0), raf: endPlan(fan[0], hip[0], hip[3], run0) },
+      { n: norm(world(rise, run1, 0)), slope: Math.atan2(rise, run1), raf: endPlan(fan[1], hip[1], hip[2], run1) },
+    ];
+    const qw = 0.5 * 1.2 * L.wind ** 2;
+    const planShare = new Map();
+    for (const f of facets) {
+      const c = Math.cos(f.slope);
+      for (const [e, A] of f.raf) {
+        const Lr = elemLen(e);
+        cost += (A / c) * m.claddingCost;
+        planShare.set(e, (planShare.get(e) || 0) + A);
+        addW(e, 'wD', [0, (-m.cladding * 1e3 * A) / c / Lr, 0]);
+        addW(e, 'wT', [0, (-L.snow * 1e3 * A) / Lr, 0]);
+        // Hip roofs see less suction than gables: external Cp ≈ −0.45 plus +0.2 internal.
+        addW(e, 'wT', scale(f.n, (0.65 * qw * A) / c / Lr));
+      }
+    }
+
+    // Every rafter foot gets the same tie-down strap a gable rafter gets (fm.anchor), so a hip roof,
+    // with more rafters reaching the wall plate, has more straps holding it down.
+    for (const e of planShare.keys()) elems[e].anchor = fm.anchor;
+
+    // Slope bracing between the commons, and the visible covering.
+    const cover = (c, rules, extra = {}) => parts.push({ piece: pid, mat: p.mat, nodes: c, elems: extra.elems || [], rules,
+      prims: [{ t: c.length === 4 ? 'quad' : 'tri', c, uv: [0, 1, 0, 1], thick: 0.06, offset: sec.h / 2 + 0.03, look: 'roof', normalHint: extra.n }] });
+    for (const [ev, rr, n, h0, h1] of [[eA, rA, facets[0].n, hip[0], hip[1]], [eB, rB, facets[1].n, hip[3], hip[2]]]) {
+      for (let k = 0; k < cu.length - 1; k++) {
+        const b1 = elem(ev[k], rg[k + 1], { ...o, sec: braceSec, truss: true, role: 'roof bracing' });
+        const b2 = elem(ev[k + 1], rg[k], { ...o, sec: braceSec, truss: true, role: 'roof bracing' });
+        cover([ev[k], ev[k + 1], rg[k + 1], rg[k]], [{ ids: [rr[k], rr[k + 1]], k: 1 }], { n, elems: [b1, b2] });
+      }
+      // Between each corner and the nearest common rafter (or the whole slope, if the ridge is too
+      // short for any commons).
+      const cA = ev === eA ? C[0] : C[3], cB = ev === eA ? C[1] : C[2];
+      if (!cu.length) cover([cA, cB, R1, R0], [{ ids: [h0, h1], k: 2 }], { n });
+      else {
+        cover([cA, ev[0], rg[0], R0], [{ ids: [h0, rr[0]], k: 1 }], { n });
+        cover([ev[cu.length - 1], cB, R1, rg[cu.length - 1]], [{ ids: [h1, rr[cu.length - 1]], k: 1 }], { n });
+      }
+    }
+    // Hip ends: one triangle between each pair of neighbouring rafters in the fan.
+    [[C[0], C[3], R0, hip[0], hip[3], fan[0], facets[2].n], [C[1], C[2], R1, hip[1], hip[2], fan[1], facets[3].n]]
+      .forEach(([ca, cb, apex, ha, hb, list, n]) => {
+        const feet = [ca, ...list.map((f) => f.foot), cb], raf = [ha, ...list.map((f) => f.e), hb];
+        for (let k = 0; k < feet.length - 1; k++) cover([feet[k], feet[k + 1], apex], [{ ids: [raf[k], raf[k + 1]], k: list.length ? 1 : 2 }], { n });
+      });
   }
 
   // ---- Join members that meet ------------------------------------------------------------

@@ -30,7 +30,7 @@ The game opens in Inspect mode so the complete house is visible; select a build 
 
 - **Build:** pick a tool (1–9, 0) and a material, click or drag on the 0.5 m grid (stronger lines every 2 m). Storeys are 3 m (Q / E to move
   between them). Walls, columns, windows and doors fill the active storey. Floors are the floor you stand on
-  at that level (a ground slab on the ground floor). Beams and roofs sit on top of the storey. Placing over a piece swaps its material. **Brace** adds X bracing to an open bay between columns. The status chip runs a live self-weight check after
+  at that level (a ground slab on the ground floor). Beams and roofs sit on top of the storey. Placing over a piece swaps its material. **Brace** adds X bracing to an open bay between columns. Roofs come as **gable** or **hip** (H toggles). Right-drag orbits, middle-drag / Shift + right-drag / arrow keys pan. The status chip runs a live self-weight check after
   every edit and flags anything with no path down to the ground.
 - **Test loads:** choose a scenario (Highveld storm, Tulbagh 1969 quake, EF4 tornado…) or set the sliders.
   Add point loads by clicking joints. **Run test** ramps the loads 0 → 100%. **Push to collapse** keeps
@@ -104,3 +104,7 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
 - 2026-11-03: The Floor tool places the floor *of* the active storey (it used to place its ceiling, so
   "Ground floor" put the slab at 3 m). Internally a slab is still the top of the storey below; a ground
   slab is `s: -1` and sits on fixed joints.
+- 2026-11-03: Hip roofs: four doubled hip rafters, commons on the ~2 m stations and a fan of rafters at each hip
+  end (feet on panel corners, so the wall model isn't loaded mid-panel), each with a tie behind it. Each rafter
+  gets the plan area it really supports and one full tie-down strap. Suction Cp 0.65 (gable 0.8), and gable
+  end triangles now catch wind. Result: a hip roof holds on 10–40% longer in wind than the same gable house.

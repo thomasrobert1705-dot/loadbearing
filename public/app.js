@@ -24,7 +24,7 @@ const TOOLS = [
   { id: 'door', label: 'Door', icon: svg('<rect x="3" y="3" width="18" height="18"/><rect x="9" y="9" width="6.5" height="12"/><circle cx="14" cy="15" r="0.6"/>'), hint: 'A wall panel with a door. Big opening, much weaker against racking.' },
   { id: 'brace', label: 'Brace', icon: svg('<rect x="3" y="3" width="18" height="18"/><path d="M3 3l18 18M21 3 3 21"/>'), hint: 'Cross bracing for an open bay. Needs columns at both ends. It turns a wobbly frame into a stiff one.' },
   { id: 'slab', label: 'Floor', icon: svg('<path d="M2 14l5-5h15l-5 5z"/><path d="M2 14v2.5h15V14M17 16.5l5-5V9"/>'), hint: 'Click a cell or drag a rectangle. Places the floor you stand on at this level: a ground slab on the ground floor, an upper floor (resting on the walls below) higher up.' },
-  { id: 'roof', label: 'Roof', icon: svg('<path d="M2 12.5 12 5l10 7.5"/><path d="M5 10.5V20h14v-9.5"/>'), hint: 'Drag a rectangle over your walls for a gable roof. R turns the ridge.' },
+  { id: 'roof', label: 'Roof', icon: svg('<path d="M2 12.5 12 5l10 7.5"/><path d="M5 10.5V20h14v-9.5"/>'), hint: 'Drag a rectangle over your walls for a roof. H switches gable / hip, R turns the ridge.' },
   { id: 'erase', label: 'Erase', icon: svg('<path d="M4 15.5 13 6.5l5.5 5.5-6.5 6.5H7z"/><path d="M8.5 11l5.5 5.5M11 19h9"/>'), hint: 'Click or drag over pieces to remove them.' },
 ];
 const TYPE_NAMES = { column: 'Column', beam: 'Beam', wall: 'Wall', window: 'Window wall', door: 'Door wall', brace: 'Cross bracing', slab: 'Floor', roof: 'Roof' };
@@ -35,6 +35,7 @@ const pieceStoreyLabel = (p) => (p.type === 'slab' ? (p.s < 0 ? 'ground slab' : 
 // "9 m of window wall", "4 m² of floor", "3 columns": how much of a kind of piece there is.
 const LINEAR_TYPES = new Set(['wall', 'window', 'door', 'beam', 'brace']);
 const qtyFmt = (v) => fmt(v, Number.isInteger(v) ? 0 : Number.isInteger(v * 10) ? 1 : 2);
+const typeName = (p) => (p.type === 'roof' ? (p.style === 'hip' ? 'Hip roof' : 'Gable roof') : TYPE_NAMES[p.type]);
 function amountOf(type, n) {
   const name = TYPE_NAMES[type].toLowerCase();
   if (LINEAR_TYPES.has(type)) return `${qtyFmt(n * CELL)} m of ${name}`;
@@ -67,6 +68,7 @@ const state = {
   mat: 'brick',
   storey: 0,
   roofAxis: 'auto',
+  roofStyle: 'gable',
   roofPitch: 30,
   design: null,
   loads: { ...LOAD_DEFAULTS, windDir: 0, quakeDir: 0 },
@@ -248,7 +250,7 @@ function candidates(p, start) {
     } else {
       const di = i1 - i0 + 1, dj = j1 - j0 + 1;
       const axis = state.roofAxis === 'auto' ? (di >= dj ? 'x' : 'z') : state.roofAxis;
-      out.push({ type: 'roof', mat, i0, j0, i1: i1 + 1, j1: j1 + 1, s, axis, pitch: state.roofPitch });
+      out.push({ type: 'roof', mat, i0, j0, i1: i1 + 1, j1: j1 + 1, s, axis, pitch: state.roofPitch, style: state.roofStyle });
     }
   }
   return out;
@@ -267,10 +269,31 @@ function ghostFor(cands) {
   const ok = cands.every(validPiece);
   const m = buildModel({ pieces: cands.map((c, k) => ({ ...c, id: -1 - k })), pointLoads: [] }, {});
   const P = (id) => [m.nodes[id].x, m.nodes[id].y, m.nodes[id].z];
-  const prims = [];
+  // The ghost is see-through, so draw each panel as one block rather than a stack of 0.5 m slices
+  // (whose touching sides would show through as a grid of lines). Slices of the same panel and
+  // look are merged when they're side by side.
+  const prims = [], groups = new Map();
   for (const part of m.parts) for (const pr of part.prims) {
-    if (pr.t === 'bar') prims.push({ ...pr, a: P(pr.a), b: P(pr.b) });
-    else prims.push({ ...pr, c: pr.c.map(P) });
+    if (pr.t === 'bar') { prims.push({ ...pr, a: P(pr.a), b: P(pr.b) }); continue; }
+    if (pr.t !== 'quad') { prims.push({ ...pr, c: pr.c.map(P) }); continue; }
+    const key = [pr.c.join(','), pr.look, pr.thick, pr.offset, pr.horizontal ? '' : `${pr.uv[2]},${pr.uv[3]}`].join('|');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(pr);
+  }
+  for (const list of groups.values()) {
+    const base = list[0];
+    if (base.horizontal) {
+      const uv = [Math.min(...list.map((p) => p.uv[0])), Math.max(...list.map((p) => p.uv[1])), Math.min(...list.map((p) => p.uv[2])), Math.max(...list.map((p) => p.uv[3]))];
+      prims.push({ ...base, uv, c: base.c.map(P) });
+      continue;
+    }
+    list.sort((a, b) => a.uv[0] - b.uv[0]);
+    let cur = [...base.uv];
+    for (const p of list.slice(1)) {
+      if (p.uv[0] <= cur[1] + 1e-6) cur[1] = Math.max(cur[1], p.uv[1]);
+      else { prims.push({ ...base, uv: cur, c: base.c.map(P) }); cur = [...p.uv]; }
+    }
+    prims.push({ ...base, uv: cur, c: base.c.map(P) });
   }
   scene.setGhost(prims, MATERIALS[state.mat].color, ok);
 }
@@ -289,7 +312,7 @@ function place(cands) {
   const slots = new Map(state.design.pieces.map((p) => [pieceSlot(p), p]));
   const changes = cands.filter((c) => {
     const ex = slots.get(pieceSlot(c));
-    return !ex || ex.type !== c.type || ex.mat !== c.mat || (c.type === 'roof' && (ex.axis !== c.axis || ex.pitch !== c.pitch));
+    return !ex || ex.type !== c.type || ex.mat !== c.mat || (c.type === 'roof' && (ex.axis !== c.axis || ex.pitch !== c.pitch || (ex.style || 'gable') !== c.style));
   });
   if (!changes.length) return;
   snapshot();
@@ -398,7 +421,7 @@ function showTipForPart(part, x, y) {
   const pt = state.model.parts[part];
   const piece = pieces.get(pt.piece);
   if (!piece) return hideTip();
-  let html = `<b>${TYPE_NAMES[piece.type]} · ${matName(piece).replace(/^./, (c) => c.toUpperCase())}</b><span class="muted">${pieceStoreyLabel(piece)}</span>`;
+  let html = `<b>${typeName(piece)} · ${matName(piece).replace(/^./, (c) => c.toUpperCase())}</b><span class="muted">${pieceStoreyLabel(piece)}</span>`;
   let u = null, mode = 0, label = 'Stress from self-weight';
   if (state.mode === 'test' && state.test) {
     const f = state.test.frames[play.idx];
@@ -627,7 +650,7 @@ function updateTimeline() {
 
 const matName = (p) => (p.type === 'roof' && MATERIALS[p.mat].roofName) || MATERIALS[p.mat].name.toLowerCase();
 function pieceText(p) {
-  return `${TYPE_NAMES[p.type].toLowerCase()} (${matName(p)}, ${pieceStoreyLabel(p)})`;
+  return `${typeName(p).toLowerCase()} (${matName(p)}, ${pieceStoreyLabel(p)})`;
 }
 function describeElem(info) {
   if (!info) return '';
@@ -791,7 +814,7 @@ function setTool(id) {
 }
 
 function updateHint() {
-  const nav = 'Right-drag orbits · Shift+right-drag pans · scroll zooms.';
+  const nav = 'Right-drag orbits · middle-drag, Shift+right-drag or arrow keys pan · scroll zooms.';
   if (state.mode === 'test') {
     $('#hint').textContent = state.plTool ? `Click a red joint to add a point load. ${nav}` : `Set the loads, then run the test. Hover to inspect. Left-drag orbits.`;
   } else $('#hint').textContent = `${TOOLS.find((t) => t.id === state.tool).hint} ${nav}`;
@@ -947,6 +970,7 @@ function initUI() {
   $('#fadeAbove').onchange = (e) => { state.fadeAbove = e.target.checked; applyStyle(); };
   $('#showDeadStress').onchange = (e) => { state.deadStress = e.target.checked; applyStyle(); };
   $('#roofAxis').onchange = (e) => { state.roofAxis = e.target.value; };
+  $('#roofStyle').onchange = (e) => { state.roofStyle = e.target.value; };
   $('#roofPitch').oninput = (e) => { state.roofPitch = +e.target.value; $('#roofPitchOut').textContent = e.target.value + '°'; };
 
   const sc = $('#scenarioSel');
@@ -1008,6 +1032,13 @@ function initUI() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // Arrow keys pan the view (in either mode).
+    const panKeys = { ArrowLeft: [-0.06, 0], ArrowRight: [0.06, 0], ArrowUp: [0, 0.06], ArrowDown: [0, -0.06] };
+    if (panKeys[e.key] && !(e.target instanceof HTMLInputElement)) {
+      e.preventDefault();
+      scene.pan(...panKeys[e.key]);
+      return;
+    }
     if (state.mode === 'build') {
       if (/^[0-9]$/.test(e.key)) {
         const n = e.key === '0' ? 10 : +e.key;
@@ -1020,6 +1051,10 @@ function initUI() {
         const order = ['auto', 'x', 'z'];
         state.roofAxis = order[(order.indexOf(state.roofAxis) + 1) % 3];
         $('#roofAxis').value = state.roofAxis;
+      }
+      if (k === 'h') {
+        state.roofStyle = state.roofStyle === 'hip' ? 'gable' : 'hip';
+        $('#roofStyle').value = state.roofStyle;
       }
       if (e.key === 'Escape') { drag = null; scene.setGhost(null); }
       if (lastPointer) onHover(lastPointer.x, lastPointer.y);

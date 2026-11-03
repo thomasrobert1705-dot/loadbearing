@@ -216,3 +216,31 @@ test('a ground slab (floor of the ground storey) sits on the ground and upsets n
   assert.equal(r.summary.failedCount, 0);
   assert.ok(r.frames.every((f) => Number.isFinite(f.maxDisp)));
 });
+
+test('hip roofs stand on every preset, including a square plan (pyramid) and an odd 3.5 m span', () => {
+  for (const p of PRESETS) {
+    const d = p.design();
+    if (!d.pieces.some((q) => q.type === 'roof')) continue;
+    d.pieces.forEach((q) => { if (q.type === 'roof') q.style = 'hip'; });
+    const r = new Structure(buildModel(d)).run({ deadOnly: true });
+    assert.equal(r.summary.failedCount, 0, `${p.name}: ${JSON.stringify(r.summary.firstDamage)}`);
+    assert.equal(r.summary.unsupported, 0, p.name);
+  }
+  for (const [w, h] of [[8, 8], [7, 9], [3, 3]]) {
+    const pieces = [...box('timber', 0, 0, w, h, 0), { type: 'roof', mat: 'timber', i0: 0, j0: 0, i1: w, j1: h, s: 0, axis: w >= h ? 'x' : 'z', pitch: 30, style: 'hip' }];
+    const r = new Structure(buildModel(withIds(pieces))).run({ deadOnly: true });
+    assert.equal(r.summary.failedCount, 0, `${w}×${h}: ${JSON.stringify(r.summary.firstDamage)}`);
+    assert.equal(r.summary.unsupported, 0, `${w}×${h}`);
+  }
+});
+
+test('a hip roof holds on in wind longer than the same house with a gable', () => {
+  for (const id of ['hut', 'bungalow']) {
+    const lam = (style) => {
+      const d = PRESETS.find((p) => p.id === id).design();
+      d.pieces.forEach((q) => { if (q.type === 'roof') q.style = style; });
+      return new Structure(buildModel(d, { wind: 40 })).run({ push: true }).summary.firstDamage.lam;
+    };
+    assert.ok(lam('hip') > lam('gable'), id);
+  }
+});

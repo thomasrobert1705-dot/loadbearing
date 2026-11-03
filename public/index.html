@@ -31,6 +31,9 @@
       <div class="tools" id="tools"></div>
 
       <div id="roofOpts" class="sub" hidden>
+        <label class="row">Style
+          <select id="roofStyle"><option value="gable">Gable: two slopes, triangular ends</option><option value="hip">Hip: slopes on all four sides</option></select>
+        </label>
         <label class="row">Ridge
           <select id="roofAxis"><option value="auto">along the long side</option><option value="x">east–west</option><option value="z">north–south</option></select>
         </label>
@@ -154,12 +157,12 @@
 <dialog id="help">
   <form method="dialog">
     <h2>How it works</h2>
-    <p><b>Build</b> on a 0.5 m grid (stronger lines every 2 m) with storeys 3 m high. Pick a tool and a material, then click or drag. <b>Floor</b> lays the floor you stand on at the working level: a ground slab on the ground floor, an upper floor resting on the walls below it higher up. Placing over an existing piece swaps its material. <b>Brace</b> adds steel-style X bracing to an open bay between two columns: compare a braced and an unbraced frame in an earthquake. Right-drag orbits the camera, Shift + right-drag pans, scroll zooms.</p>
+    <p><b>Build</b> on a 0.5 m grid (stronger lines every 2 m) with storeys 3 m high. Pick a tool and a material, then click or drag. <b>Floor</b> lays the floor you stand on at the working level: a ground slab on the ground floor, an upper floor resting on the walls below it higher up. Placing over an existing piece swaps its material. <b>Brace</b> adds steel-style X bracing to an open bay between two columns: compare a braced and an unbraced frame in an earthquake. Right-drag orbits the camera; middle-drag, Shift + right-drag or the arrow keys pan; scroll zooms.</p>
     <p><b>The physics.</b> Your house becomes a 3D frame: every column, beam and edge of a wall or floor is a beam element with six degrees of freedom at each end. Walls and floors also get diagonal struts, which give them their stiffness against racking (the standard "equivalent strut" model for infill walls). Small pieces are merged into panels of up to 2 m before analysis, so a fine layout doesn't slow the solver down. The program assembles the stiffness matrix and solves <i>K·u = F</i> for how every joint moves. That is the direct stiffness method used by structural engineering software.</p>
     <p><b>Breaking.</b> Each member is checked for tension, crushing, buckling (Euler, combined with crushing via Rankine–Gordon), bending and shear against its material's strength. Roof rafters are also checked for their tie-down straps pulling out. When something exceeds 100%, it breaks, the loads find a new path, and the house is re-analysed. Anything no longer connected to the ground falls.</p>
     <p><b>Loads.</b> Self-weight is always on. Test loads ramp from 0 to 100% so you can see what goes first. Wind uses dynamic pressure ½ρv² with pressure coefficients for the windward wall (+0.8), the leeward wall (−0.5) and roof suction (−0.8). Earthquakes use the equivalent static method: base shear = 2.5 × peak ground acceleration × weight, shared up the height.</p>
     <p class="note">It's a teaching model, not a design tool. Strengths are unfactored, analysis is linear-elastic, and walls are simplified to strips and struts. Don't use it to sign off a real building.</p>
-    <p><b>Keys:</b> 1–9, 0 tools · Q / E storey down / up · R turn roof ridge · Ctrl+Z / Ctrl+Y undo / redo · Space run test</p>
+    <p><b>Keys:</b> 1–9, 0 tools · Q / E storey down / up · R turn roof ridge · H gable / hip roof · Ctrl+Z / Ctrl+Y undo / redo · Space run test</p>
     <button class="primary">Got it</button>
   </form>
 </dialog>

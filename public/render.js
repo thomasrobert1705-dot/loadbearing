@@ -107,7 +107,23 @@ export class Scene3D {
   }
 
   setLeftDrag(orbit) {
-    this.controls.mouseButtons = { LEFT: orbit ? THREE.MOUSE.ROTATE : null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    // Right-drag orbits, middle-drag (or Shift + right-drag) pans, the wheel zooms.
+    this.controls.mouseButtons = { LEFT: orbit ? THREE.MOUSE.ROTATE : null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+  }
+
+  // Slide the view across the ground: dx to the right of the screen, dz away from you, as a
+  // fraction of the current viewing distance.
+  pan(dx, dz) {
+    const c = this.controls, cam = this.camera;
+    const fwd = new THREE.Vector3().subVectors(c.target, cam.position).setY(0);
+    if (fwd.lengthSq() < 1e-9) fwd.set(0, 0, -1);
+    fwd.normalize();
+    const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    const d = cam.position.distanceTo(c.target);
+    const move = right.multiplyScalar(dx * d).add(fwd.multiplyScalar(dz * d));
+    c.target.add(move);
+    cam.position.add(move);
+    c.update();
   }
 
   setView(view = 'perspective') {
@@ -202,8 +218,14 @@ export class Scene3D {
     for (const pad of this.footings.children) pad.material.dispose();
     this.footings.clear();
     const padMat = new THREE.MeshStandardMaterial({ color: 0x8c8a84, roughness: 1 });
-    model.nodes.forEach((n) => {
-      if (!n.fixed) return;
+    // Pads only where something stands on the ground (not under every joint of a ground slab).
+    const standing = new Set();
+    for (const e of model.elems) {
+      const a = model.nodes[e.n1], b = model.nodes[e.n2];
+      if (Math.abs(a.y - b.y) > 1e-6) { standing.add(e.n1); standing.add(e.n2); }
+    }
+    model.nodes.forEach((n, id) => {
+      if (!n.fixed || !standing.has(id)) return;
       const pad = new THREE.Mesh(this.boxGeo, padMat);
       pad.scale.set(0.6, 0.12, 0.6);
       pad.position.set(n.x, 0.06, n.z);
@@ -525,20 +547,23 @@ export function placePrim(prim, mesh, pos) {
     const [c0, c1, c2, c3] = prim.c.map((id) => pos(id));
     const [u0, u1, v0, v1] = prim.uv;
     const bil = (u, v) => [0, 1, 2].map((d) => (1 - u) * (1 - v) * c0[d] + u * (1 - v) * c1[d] + u * v * c2[d] + (1 - u) * v * c3[d]);
-    const q = [bil(u0, v0), bil(u1, v0), bil(u1, v1), bil(u0, v1)];
+    let q = [bil(u0, v0), bil(u1, v0), bil(u1, v1), bil(u0, v1)];
     let n = cross3(sub3(c1, c0), sub3(c3, c0));
     n = norm3(n);
-    if (prim.horizontal && n[1] < 0) n = n.map((v) => -v);
-    if (prim.normalHint && dot3(n, prim.normalHint) < 0) n = n.map((v) => -v);
+    const flip = (prim.horizontal && n[1] < 0) || (prim.normalHint && dot3(n, prim.normalHint) < 0);
+    // Flipping the normal must flip the winding too, or the slab is drawn inside out (from above
+    // you'd see its inner walls as a grid of dark lines).
+    if (flip) { n = n.map((v) => -v); q = [q[0], q[3], q[2], q[1]]; }
     const off = prim.offset || 0, t = prim.thick / 2;
     const top = q.map((p) => add3(p, n, off + t));
     const bot = q.map((p) => add3(p, n, off - t));
     writeQuadSlab(arr, top, bot);
   } else if (prim.t === 'tri') {
-    const c = prim.c.map((id) => pos(id));
-    const n = norm3(cross3(sub3(c[1], c[0]), sub3(c[2], c[0])));
-    const t = prim.thick / 2;
-    const top = c.map((p) => add3(p, n, t)), bot = c.map((p) => add3(p, n, -t));
+    let c = prim.c.map((id) => pos(id));
+    let n = norm3(cross3(sub3(c[1], c[0]), sub3(c[2], c[0])));
+    if (prim.normalHint && dot3(n, prim.normalHint) < 0) { n = n.map((v) => -v); c = [c[0], c[2], c[1]]; }
+    const t = prim.thick / 2, off = prim.offset || 0;
+    const top = c.map((p) => add3(p, n, off + t)), bot = c.map((p) => add3(p, n, off - t));
     let k = 0;
     const tri = (a, b, d) => { for (const p of [a, b, d]) { arr[k++] = p[0]; arr[k++] = p[1]; arr[k++] = p[2]; } };
     tri(top[0], top[1], top[2]); tri(bot[0], bot[2], bot[1]);
