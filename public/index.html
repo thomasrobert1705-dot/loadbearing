@@ -23,6 +23,7 @@
     <div class="seg" id="modeSeg" role="tablist" aria-label="Workspace mode">
       <button data-mode="build" class="on" role="tab" aria-selected="true" aria-controls="buildPanel">Build</button>
       <button data-mode="test" role="tab" aria-selected="false" aria-controls="testPanel">Test loads</button>
+      <button data-mode="challenges" role="tab" aria-selected="false" aria-controls="challengePanel">Challenges</button>
     </div>
 
     <!-- ============ BUILD ============ -->
@@ -52,7 +53,7 @@
         <button id="storeyUp" title="Storey up (E)">+</button>
       </div>
       <label class="check"><input type="checkbox" id="fadeAbove" checked> Fade storeys above</label>
-      <label class="check"><input type="checkbox" id="showDeadStress"> Colour by self-weight stress</label>
+      <label class="check"><input type="checkbox" id="showDeadStress"> Colour by self-weight</label>
 
       <h2>Your blueprint</h2>
       <div class="row2">
@@ -71,6 +72,14 @@
       </div>
 
       
+    </section>
+
+    <!-- ============ CHALLENGES ============ -->
+    <section id="challengePanel" class="panel" hidden>
+      <h2>Challenges <span id="chProgress"></span></h2>
+      <p class="note">Pick a brief, build it, then press <b>Test it</b>. Storms and quakes hit from two directions, so brace both ways.
+        ★ nothing falls · ★★ nothing breaks · ★★★ and at most 75% of the budget.</p>
+      <div id="chList" class="ch-list"></div>
     </section>
 
     <!-- ============ TEST ============ -->
@@ -121,8 +130,15 @@
 
       <h2>Display</h2>
       <label class="row">Exaggerate movement <input type="range" id="exag" min="0" max="3" step="0.05" value="2"><output id="exagOut"></output></label>
-      <label class="check"><input type="checkbox" id="colorStress" checked> Colour by stress</label>
-      <div class="legend"><span>0%</span><i></i><span>100% = breaks</span></div>
+      <label class="row">Colour by
+        <select id="colorBy">
+          <option value="stress">How hard it's working</option>
+          <option value="force">Pulling vs squashing</option>
+          <option value="none">Real materials</option>
+        </select>
+      </label>
+      <div class="legend" id="legendStress"><span>0%</span><i></i><span>100% = breaks</span></div>
+      <div class="legend legend-force" id="legendForce" hidden><span>pulled (tension)</span><i></i><span>squashed (compression)</span></div>
     </section>
 
     <footer class="foot">
@@ -132,6 +148,7 @@
 
   <main id="stage">
     <div id="canvasWrap" aria-label="Interactive 3D building plot"></div>
+    <div id="challengeBar" hidden></div>
     <div class="scene-heading"><div class="eyebrow">DESIGN · BUILD · BREAK · REPEAT</div><h1>A little ambition.<br>A lot of possibility.</h1><p>Build something. See what it can withstand.</p></div>
     <div class="view-controls" role="group" aria-label="Camera views">
       <button data-view="perspective" class="on" title="Perspective view">3D</button>

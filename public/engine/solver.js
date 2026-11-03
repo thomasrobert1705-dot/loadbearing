@@ -304,15 +304,16 @@ export class Structure {
     let sol = this.solve(active, seen);
 
     const utilAt = (lam) => {
-      const u = new Float32Array(this.ne), md = new Uint8Array(this.ne);
+      const u = new Float32Array(this.ne), md = new Uint8Array(this.ne), n = new Float32Array(this.ne);
       let max = 0, arg = -1;
+      const out = {};
       for (let i = 0; i < this.ne; i++) {
         if (!active[i]) continue;
-        const r = this.check(i, sol, lam);
-        u[i] = r.util; md[i] = r.mode;
+        const r = this.check(i, sol, lam, out);
+        u[i] = r.util; md[i] = r.mode; n[i] = out.N;
         if (r.util > max) { max = r.util; arg = i; }
       }
-      return { u, md, max, arg };
+      return { u, md, n, max, arg };
     };
 
     const record = (lam, ut, failedNow, fallenNow, failedModes = []) => {
@@ -340,7 +341,7 @@ export class Structure {
       });
       let fallenMass = 0;
       for (let p = 0; p < this.np; p++) if (fallen[p] >= 0) fallenMass += this.partMass[p];
-      frames.push({ lam, U, maxDisp, partUtil, partMode, elemUtil: ut.u, elemMode: ut.md,
+      frames.push({ lam, U, maxDisp, partUtil, partMode, elemUtil: ut.u, elemMode: ut.md, elemN: ut.n,
         active: active.slice(), failed: failedNow, failedModes, fell: fallenNow, fallenFrac: fallenMass / this.totalMass });
     };
 

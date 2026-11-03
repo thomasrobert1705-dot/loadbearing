@@ -244,3 +244,29 @@ test('a hip roof holds on in wind longer than the same house with a gable', () =
     assert.ok(lam('hip') > lam('gable'), id);
   }
 });
+
+test('challenges: each one can be won with a sensible build, and the obvious cheap mistake loses', async () => {
+  const { CHALLENGES, loadCases, score } = await import('../public/engine/challenges.js');
+  // A house with a 1 m door on the south side and a 2 m window on the north.
+  const ring = (type, mat, w, h, s) => {
+    const out = [];
+    const S = (i) => (i === 3 || i === 4 ? 'door' : type), N = (i) => (i >= 2 && i < 6 ? 'window' : type);
+    for (let i = 0; i < w; i++) out.push({ type: S(i), mat, i1: i, j1: 0, i2: i + 1, j2: 0, s }, { type: N(i), mat, i1: i, j1: h, i2: i + 1, j2: h, s });
+    for (let j = 0; j < h; j++) out.push({ type, mat, i1: 0, j1: j, i2: 0, j2: j + 1, s }, { type, mat, i1: w, j1: j, i2: w, j2: j + 1, s });
+    return out;
+  };
+  const roof = (mat, w, h, s) => ({ type: 'roof', mat, i0: 0, j0: 0, i1: w, j1: h, s, axis: w >= h ? 'x' : 'z', pitch: 30, style: 'hip' });
+  const attempt = (id, pieces) => {
+    const ch = CHALLENGES.find((c) => c.id === id), d = withIds(pieces);
+    const sums = loadCases(ch).map((L) => new Structure(buildModel(d, L)).run({}).summary);
+    return score(ch, d, buildModel(d).totals.cost, sums);
+  };
+  assert.ok(attempt('starter', [...ring('wall', 'brick', 12, 10, 0), roof('brick', 12, 10, 0)]).stars >= 2);
+  assert.ok(attempt('tulbagh', [...ring('wall', 'timber', 12, 10, 0), roof('timber', 12, 10, 0)]).stars >= 2);
+  const brickQuake = attempt('tulbagh', [...ring('wall', 'brick', 12, 10, 0), roof('brick', 12, 10, 0)]);
+  assert.equal(brickQuake.stars, 0, 'unreinforced brick should not survive Tulbagh');
+  assert.ok(brickQuake.fell);
+  const tooSmall = attempt('starter', [...ring('wall', 'brick', 6, 6, 0), roof('brick', 6, 6, 0)]);
+  assert.equal(tooSmall.stars, 0);
+  assert.deepEqual(tooSmall.missing, ['30 m² under roof']);
+});

@@ -2,6 +2,7 @@ import { Scene3D, GRID } from './render.js';
 import { buildModel, pieceSlot, upgradeDesign } from './engine/model.js';
 import { MATERIALS, MATERIAL_IDS, CELL, STOREY, LOAD_DEFAULTS } from './engine/materials.js';
 import { PRESETS } from './engine/presets.js';
+import { CHALLENGES, loadCases, score, measure, REQ_TEXT } from './engine/challenges.js';
 import { MODES } from './engine/solver.js';
 
 const $ = (s) => document.querySelector(s);
@@ -69,6 +70,7 @@ const state = {
   storey: 0,
   roofAxis: 'auto',
   roofStyle: 'gable',
+  challenge: null,
   roofPitch: 30,
   design: null,
   loads: { ...LOAD_DEFAULTS, windDir: 0, quakeDir: 0 },
@@ -81,7 +83,7 @@ const state = {
   check: null,
   test: null,
   exag: 100,
-  colorStress: true,
+  colorBy: 'stress',
   plTool: false,
   hoverPart: null,
 };
@@ -94,13 +96,14 @@ function loadSaved() {
       Object.assign(state.loads, s.loads || {});
       if (s.mat && MATERIALS[s.mat]) state.mat = s.mat;
       if (s.scenario) state.scenario = s.scenario;
+      if (CHALLENGES.some((c) => c.id === s.challenge)) state.challenge = s.challenge;
       return;
     }
   } catch { /* storage unavailable: start fresh */ }
   state.design = PRESETS[0].design();
 }
 function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify({ design: state.design, loads: state.loads, mat: state.mat, scenario: state.scenario })); } catch { /* ignore */ }
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ design: state.design, loads: state.loads, mat: state.mat, scenario: state.scenario, challenge: state.challenge })); } catch { /* ignore */ }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -178,6 +181,33 @@ function isFaded(piece) {
   return false;
 }
 
+// "Pulling vs squashing": blue for members in tension, red for compression, stronger the more
+// stressed they are relative to the most stressed member in view (so load paths show up even
+// under small loads). Each part shows its most stressed member.
+const forceCache = new WeakMap();
+const TENSION = [47, 111, 214], SQUASH = [214, 69, 47], NEUTRAL = [222, 217, 204];
+function forceColors(f) {
+  if (forceCache.has(f)) return forceCache.get(f);
+  const { elems, parts } = state.model;
+  const sig = new Float32Array(elems.length);
+  let max = 1e-9;
+  elems.forEach((e, k) => {
+    if (!f.active[k] && f.active.length) return;
+    sig[k] = (f.elemN?.[k] || 0) / e.sec.A;
+    max = Math.max(max, Math.abs(sig[k]));
+  });
+  const out = parts.map((pt) => {
+    let best = 0;
+    for (const e of pt.elems) if (Math.abs(sig[e]) > Math.abs(best)) best = sig[e];
+    const t = Math.sqrt(Math.abs(best) / max), to = best >= 0 ? TENSION : SQUASH;
+    const c = NEUTRAL.map((v, d) => Math.round(v + (to[d] - v) * t));
+    return (c[0] << 16) | (c[1] << 8) | c[2];
+  });
+  forceCache.set(f, out);
+  return out;
+}
+const partColor = (f, i) => (state.colorBy === 'force' ? forceColors(f)[i] : utilColor(f.partUtil[i]));
+
 function applyStyle() {
   const hoverPiece = state.hoverPart != null ? state.model.parts[state.hoverPart]?.piece : null;
   const T = state.test, P = play;
@@ -188,13 +218,13 @@ function applyStyle() {
     if (state.mode === 'test' && T) {
       const f = T.frames[P.idx];
       if (P.hidden.has(i)) return { hidden: true };
-      if (state.colorStress) s.color = utilColor(f.partUtil[i]);
+      if (state.colorBy !== 'none') s.color = partColor(f, i);
       s.damaged = part.elems.some((e) => !f.active[e]);
     } else if (state.mode === 'test') {
-      if (state.colorStress && state.check) s.color = utilColor(state.check.frames.at(-1).partUtil[i]);
+      if (state.colorBy !== 'none' && state.check) s.color = partColor(state.check.frames.at(-1), i);
     } else {
       const ck = state.check?.frames.at(-1);
-      if (state.deadStress && ck) s.color = utilColor(ck.partUtil[i]);
+      if (state.deadStress && ck) s.color = partColor(ck, i);
       if (ck && state.check.frames.some((f) => f.fell.includes(i))) { s.color = 0xe04040; s.glow = 0x550000; }
       if (isFaded(piece)) s.opacity = 0.12;
     }
@@ -347,7 +377,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (state.plTool) addPointLoadAt(e.clientX, e.clientY);
     return;
   }
-  if (state.tool === 'inspect') return;
+  if (state.tool === 'inspect' || state.panel === 'challenges') return;
   if (state.tool === 'erase') {
     drag = { erase: true, erased: new Set() };
     const part = scene.pickPart(e.clientX, e.clientY);
@@ -371,7 +401,7 @@ function onHover(x, y) {
     if (state.plTool) return hoverNode(x, y);
     return hoverInspect(x, y);
   }
-  if (state.tool === 'inspect') return hoverInspect(x, y);
+  if (state.tool === 'inspect' || state.panel === 'challenges') return hoverInspect(x, y);
   if (state.tool === 'erase') {
     const part = scene.pickPart(x, y);
     if (drag?.erase && part != null) {
@@ -528,7 +558,18 @@ async function runTest(push) {
   try {
     const r = await analyse('test', { design: state.design, loads: state.loads, push });
     if (!r) return;
-    state.test = { ...r, push, loads: { ...state.loads } };
+    startPlayback(r, push, state.loads);
+  } catch (err) {
+    alert('Analysis failed: ' + err.message);
+  } finally {
+    $('#busy').hidden = true;
+    $('#runBtn').disabled = $('#pushBtn').disabled = false;
+  }
+}
+
+function startPlayback(r, push, loads) {
+  {
+    state.test = { ...r, push, loads: { ...loads } };
     // Frame timing: load steps are quick, failures linger so you can see them.
     let t = 0;
     play.cum = r.frames.map((f, i) => {
@@ -545,11 +586,6 @@ async function runTest(push) {
     showResults();
     $('#timeline').hidden = false;
     $('#stage').classList.add('has-timeline');
-  } catch (err) {
-    alert('Analysis failed: ' + err.message);
-  } finally {
-    $('#busy').hidden = true;
-    $('#runBtn').disabled = $('#pushBtn').disabled = false;
   }
 }
 
@@ -787,12 +823,122 @@ function updateStatus() {
 }
 
 function updateStats() {
+  updateChallengeBar();
   const t = state.model.totals;
   $('#stats').innerHTML = `
     <dt>Pieces</dt><dd>${fmt(state.design.pieces.length)}</dd>
     <dt>Weight</dt><dd>${fmt(t.mass / 1000, 1)} t</dd>
     <dt>Est. materials</dt><dd>R ${fmt(Math.round(t.cost / 100) * 100)}</dd>
     <dt>Frame</dt><dd>${fmt(state.model.nodes.length)} joints · ${fmt(state.model.elems.length)} members</dd>`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Challenges
+
+const CH_KEY = 'loadbearing.challenges';
+function bestStars() { try { return JSON.parse(localStorage.getItem(CH_KEY) || '{}'); } catch { return {}; } }
+function saveStars(id, n) {
+  const b = bestStars();
+  if ((b[id] || 0) >= n) return;
+  b[id] = n;
+  try { localStorage.setItem(CH_KEY, JSON.stringify(b)); } catch { /* ignore */ }
+}
+const starsHtml = (n) => `<span class="ch-stars" aria-label="${n} of 3 stars">${'★'.repeat(n)}<span class="off">${'★'.repeat(3 - n)}</span></span>`;
+function hazardText(ch) {
+  const L = ch.loads, out = [];
+  if (L.wind) out.push(`${fmt(L.wind)} m/s wind`);
+  if (L.quake) out.push(`${fmt(L.quake, 2)} g quake`);
+  if (L.snow) out.push(`${fmt(L.snow, 1)} kPa snow`);
+  if (L.live >= 2) out.push(`${fmt(L.live, 1)} kPa crowd`);
+  return out.join(' + ');
+}
+function renderChallenges() {
+  const best = bestStars();
+  const total = CHALLENGES.reduce((a, c) => a + (best[c.id] || 0), 0);
+  $('#chProgress').textContent = `${total} / ${CHALLENGES.length * 3} ★`;
+  $('#chList').innerHTML = CHALLENGES.map((c) => `
+    <div class="ch-card${state.challenge === c.id ? ' on' : ''}" data-id="${c.id}">
+      <div class="ch-head"><span class="ch-icon" aria-hidden="true">${c.icon}</span><b>${c.name}</b>${starsHtml(best[c.id] || 0)}</div>
+      <p>${c.brief}</p>
+      <div class="ch-meta">Budget R ${fmt(c.budget)} · ${hazardText(c)} · needs ${Object.entries(c.req).map(([k, v]) => REQ_TEXT[k](v)).join(', ')}</div>
+      <button class="${state.challenge === c.id ? '' : 'primary'}">${state.challenge === c.id ? 'Back to building' : 'Take it on'}</button>
+    </div>`).join('');
+  $('#chList').querySelectorAll('.ch-card button').forEach((b) => {
+    b.onclick = () => {
+      state.challenge = b.closest('.ch-card').dataset.id;
+      save();
+      updateChallengeBar();
+      setMode('build');
+    };
+  });
+}
+function updateChallengeBar() {
+  const ch = CHALLENGES.find((c) => c.id === state.challenge);
+  const bar = $('#challengeBar');
+  $('#stage').classList.toggle('has-challenge', !!ch);
+  if (!ch) { bar.hidden = true; return; }
+  const got = measure(state.design), cost = state.model.totals.cost;
+  const reqs = Object.entries(ch.req).map(([k, v]) => {
+    const ok = got[k] >= v - 1e-9;
+    return `<span class="req ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'} ${REQ_TEXT[k](v)}${ok ? '' : ` (have ${fmt(got[k], k === 'storeys' ? 0 : 1)})`}</span>`;
+  });
+  const okCost = cost <= ch.budget;
+  reqs.unshift(`<span class="req ${okCost ? 'ok' : 'no'}">${okCost ? '✓' : '✗'} R ${fmt(Math.round(cost / 100) * 100)} of R ${fmt(ch.budget)}</span>`);
+  bar.innerHTML = `<span class="ch-title">${ch.icon} ${ch.name}</span><span class="req">${hazardText(ch)}</span>${reqs.join('')}
+    <span class="ch-actions"><button class="primary" id="chTest">Test it</button><button id="chQuit" title="Leave this challenge" aria-label="Leave this challenge">✕</button></span>`;
+  bar.hidden = false;
+  $('#chTest').onclick = attemptChallenge;
+  $('#chQuit').onclick = () => { state.challenge = null; save(); updateChallengeBar(); if (!$('#challengePanel').hidden) renderChallenges(); };
+}
+async function attemptChallenge() {
+  const ch = CHALLENGES.find((c) => c.id === state.challenge);
+  if (!ch || !state.design.pieces.length) return;
+  $('#busy').hidden = false;
+  $('#chTest').disabled = true;
+  try {
+    const runs = [];
+    for (const L of loadCases(ch)) {
+      const r = await analyse('test', { design: state.design, loads: L, push: false });
+      if (!r) return;
+      runs.push({ r, L });
+    }
+    const sc = score(ch, state.design, state.model.totals.cost, runs.map((x) => x.r.summary));
+    // Show the direction that did the most damage.
+    const bad = (x) => [x.r.summary.fallenFrac, x.r.summary.failedCount, x.r.summary.worst?.util || 0];
+    runs.sort((a, b) => { const A = bad(a), B = bad(b); return B[0] - A[0] || B[1] - A[1] || B[2] - A[2]; });
+    const shown = runs[0];
+    if (sc.stars) saveStars(ch.id, sc.stars);
+    Object.assign(state.loads, shown.L);
+    state.scenario = 'custom';
+    setMode('test');
+    syncSliders();
+    scene.setWeather(state.loads);
+    startPlayback(shown.r, false, shown.L);
+    const reasons = [];
+    if (sc.missing.length) reasons.push(`The brief needs ${sc.missing.join(', ')}.`);
+    if (sc.overBudget) reasons.push(`Over budget: R ${fmt(Math.round(state.model.totals.cost / 100) * 100)} of R ${fmt(ch.budget)}.`);
+    if (sc.fell) reasons.push('Part of it came down.');
+    let headline;
+    if (!sc.stars) headline = `${ch.name}: not yet`;
+    else if (sc.stars === 3) headline = `${ch.name}: perfect!`;
+    else headline = `${ch.name}: passed`;
+    const tips = [];
+    if (sc.stars === 1) tips.push('Some members broke. Stop that for a second star.');
+    if (sc.stars === 2) tips.push(`Undamaged! Get it under R ${fmt(0.75 * ch.budget)} (75% of the budget) for the third star.`);
+    const dir = runs.length > 1 ? `<p class="lesson">Shown: the worse of the two directions (${shown.L.wind ? `wind from the ${compass(shown.L.windDir + 180)}` : `shaking ${shown.L.quakeDir ? 'N–S' : 'E–W'}`}).</p>` : '';
+    const v = document.createElement('div');
+    v.className = 'ch-verdict';
+    v.innerHTML = `${starsHtml(sc.stars)}<b>${headline}</b>
+      ${reasons.length || tips.length ? `<ul>${[...reasons, ...tips].map((t) => `<li>${t}</li>`).join('')}</ul>` : ''}
+      <p class="lesson">💡 ${ch.lesson}</p>${dir}`;
+    $('#results').prepend(v);
+  } catch (err) {
+    alert('Analysis failed: ' + err.message);
+  } finally {
+    $('#busy').hidden = true;
+    const b = $('#chTest');
+    if (b) b.disabled = false;
+  }
 }
 
 function updateUndo() {
@@ -837,13 +983,19 @@ function setMaterial(id) {
 }
 
 function setMode(mode) {
+  // The Challenges tab is a build-mode view with a different side panel.
+  const panel = mode;
+  state.panel = panel;
+  if (mode === 'challenges') mode = 'build';
   state.mode = mode;
   $('#stage').dataset.mode = mode;
   $('.scene-heading h1').innerHTML = mode === 'build' ? 'A little ambition.<br>A lot of possibility.' : 'Put your ideas<br>under pressure.';
   $('.scene-heading p').textContent = mode === 'build' ? 'Build something. See what it can withstand.' : 'Choose a scenario. Find your structure’s limits.';
-  document.querySelectorAll('#modeSeg button').forEach((b) => { b.classList.toggle('on', b.dataset.mode === mode); b.setAttribute('aria-selected', String(b.dataset.mode === mode)); });
-  $('#buildPanel').hidden = mode !== 'build';
-  $('#testPanel').hidden = mode !== 'test';
+  document.querySelectorAll('#modeSeg button').forEach((b) => { b.classList.toggle('on', b.dataset.mode === panel); b.setAttribute('aria-selected', String(b.dataset.mode === panel)); });
+  $('#buildPanel').hidden = panel !== 'build';
+  $('#testPanel').hidden = panel !== 'test';
+  $('#challengePanel').hidden = panel !== 'challenges';
+  if (panel === 'challenges') renderChallenges();
   scene.setGhost(null);
   hideTip();
   state.plTool = false;
@@ -1011,7 +1163,12 @@ function initUI() {
     if (state.test) renderFrame();
   };
   $('#exagOut').textContent = '×' + fmt(state.exag);
-  $('#colorStress').onchange = (e) => { state.colorStress = e.target.checked; applyStyle(); };
+  $('#colorBy').onchange = (e) => {
+    state.colorBy = e.target.value;
+    $('#legendStress').hidden = state.colorBy !== 'stress';
+    $('#legendForce').hidden = state.colorBy !== 'force';
+    applyStyle();
+  };
   $('#helpBtn').onclick = () => $('#help').showModal();
   $('#headerHelp').onclick = () => $('#help').showModal();
   let cameraView = 'perspective';

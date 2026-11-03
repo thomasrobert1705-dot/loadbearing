@@ -37,6 +37,14 @@ The game opens in Inspect mode so the complete house is visible; select a build 
   going until half the house is down and reports the load factor it reached. Scrub the timeline, or click
   an event in the log to jump to it.
 
+- **Challenges:** seven briefs (braai shelter, starter home in a Cape gale, Drakensberg chalet, Tulbagh
+  rebuild, upstairs party, family home in a quake zone, tornado safe room), each with a budget, a minimum
+  size and a hazard. **Test it** checks your build from two directions at right angles and scores ★ nothing
+  fell, ★★ nothing broke, ★★★ and at most 75% of the budget. Stars are kept in the browser.
+- **Colour by:** *how hard it's working* (utilisation), *pulling vs squashing* (blue tension, red
+  compression, relative to the most stressed member, so load paths show even under small loads), or real
+  materials.
+
 ## How the physics works
 
 `public/engine/` is plain ES modules, shared by the browser and the Node tests.
@@ -47,6 +55,7 @@ The game opens in Inspect mode so the complete house is visible; select a build 
 | `model.js` | design → structural panels → nodes, 3D frame elements, load vectors (dead `FD`, test `FT`), render parts |
 | `solver.js` | direct stiffness method, member checks, progressive collapse |
 | `presets.js` | the sample houses |
+| `challenges.js` | challenge briefs, load cases and star scoring |
 
 - **Fine grid, coarse structure:** you build on a 0.5 m grid, but the analysis merges runs of the same
   wall into panels of up to 2 m (split wherever a column or cross wall meets them), floors into rectangles
@@ -108,3 +117,6 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
   end (feet on panel corners, so the wall model isn't loaded mid-panel), each with a tie behind it. Each rafter
   gets the plan area it really supports and one full tie-down strap. Suction Cp 0.65 (gable 0.8), and gable
   end triangles now catch wind. Result: a hip roof holds on 10–40% longer in wind than the same gable house.
+- 2026-11-03: Challenges test wind and quakes from 0° and 90° so a one-way-braced build can't pass. Budgets
+  were set so a sensible build gets ★★ and ★★★ takes a cheaper idea (`test/solver.test.mjs` checks one
+  winning build per hazard and that unreinforced brick with openings fails Tulbagh).
