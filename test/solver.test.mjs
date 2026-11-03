@@ -205,3 +205,14 @@ test('cross bracing stiffens an open column frame against sideways load', () => 
   const a = sway(frame), b = sway(braced);
   assert.ok(b < a / 10, `braced ${b} vs open ${a}`);
 });
+
+test('a ground slab (floor of the ground storey) sits on the ground and upsets nothing', () => {
+  const pieces = [...box('brick', 0, 0, 8, 6, 0)];
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 6; j++) pieces.push({ type: 'slab', mat: 'concrete', i, j, s: -1 });
+  const m = buildModel(withIds(pieces), { live: 2 });
+  assert.ok(m.nodes.every((n) => n.y > 0 || n.fixed));
+  const r = new Structure(m).run({});
+  assert.equal(r.summary.unsupported, 0);
+  assert.equal(r.summary.failedCount, 0);
+  assert.ok(r.frames.every((f) => Number.isFinite(f.maxDisp)));
+});

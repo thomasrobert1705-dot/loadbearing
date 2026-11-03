@@ -29,8 +29,8 @@ The game opens in Inspect mode so the complete house is visible; select a build 
 ## Playing
 
 - **Build:** pick a tool (1–9, 0) and a material, click or drag on the 0.5 m grid (stronger lines every 2 m). Storeys are 3 m (Q / E to move
-  between them). Walls, columns, windows and doors fill the active storey. Beams, floors and roofs sit on
-  top of it. Placing over a piece swaps its material. **Brace** adds X bracing to an open bay between columns. The status chip runs a live self-weight check after
+  between them). Walls, columns, windows and doors fill the active storey. Floors are the floor you stand on
+  at that level (a ground slab on the ground floor). Beams and roofs sit on top of the storey. Placing over a piece swaps its material. **Brace** adds X bracing to an open bay between columns. The status chip runs a live self-weight check after
   every edit and flags anything with no path down to the ground.
 - **Test loads:** choose a scenario (Highveld storm, Tulbagh 1969 quake, EF4 tornado…) or set the sliders.
   Add point loads by clicking joints. **Run test** ramps the loads 0 → 100%. **Push to collapse** keeps
@@ -101,3 +101,6 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
 - 2026-11-03: Added glulam, sandstone, structural glass and carbon fibre, plus cross bracing. Masonry and
   thin metal-plate floors fail under their own weight in the timber double-storey: that's physics, not a
   bug (stone doesn't span).
+- 2026-11-03: The Floor tool places the floor *of* the active storey (it used to place its ceiling, so
+  "Ground floor" put the slab at 3 m). Internally a slab is still the top of the storey below; a ground
+  slab is `s: -1` and sits on fixed joints.

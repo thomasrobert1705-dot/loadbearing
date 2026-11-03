@@ -23,7 +23,7 @@ const TOOLS = [
   { id: 'window', label: 'Window', icon: svg('<rect x="3" y="4" width="18" height="16"/><rect x="7.5" y="8" width="9" height="7"/><path d="M12 8v7M7.5 11.5h9"/>'), hint: 'A wall panel with a window. The opening makes it weaker against racking.' },
   { id: 'door', label: 'Door', icon: svg('<rect x="3" y="3" width="18" height="18"/><rect x="9" y="9" width="6.5" height="12"/><circle cx="14" cy="15" r="0.6"/>'), hint: 'A wall panel with a door. Big opening, much weaker against racking.' },
   { id: 'brace', label: 'Brace', icon: svg('<rect x="3" y="3" width="18" height="18"/><path d="M3 3l18 18M21 3 3 21"/>'), hint: 'Cross bracing for an open bay. Needs columns at both ends. It turns a wobbly frame into a stiff one.' },
-  { id: 'slab', label: 'Floor', icon: svg('<path d="M2 14l5-5h15l-5 5z"/><path d="M2 14v2.5h15V14M17 16.5l5-5V9"/>'), hint: 'Click a cell or drag a rectangle. Floors sit at the top of the storey and tie the walls together.' },
+  { id: 'slab', label: 'Floor', icon: svg('<path d="M2 14l5-5h15l-5 5z"/><path d="M2 14v2.5h15V14M17 16.5l5-5V9"/>'), hint: 'Click a cell or drag a rectangle. Places the floor you stand on at this level: a ground slab on the ground floor, an upper floor (resting on the walls below) higher up.' },
   { id: 'roof', label: 'Roof', icon: svg('<path d="M2 12.5 12 5l10 7.5"/><path d="M5 10.5V20h14v-9.5"/>'), hint: 'Drag a rectangle over your walls for a gable roof. R turns the ridge.' },
   { id: 'erase', label: 'Erase', icon: svg('<path d="M4 15.5 13 6.5l5.5 5.5-6.5 6.5H7z"/><path d="M8.5 11l5.5 5.5M11 19h9"/>'), hint: 'Click or drag over pieces to remove them.' },
 ];
@@ -31,7 +31,7 @@ const TYPE_NAMES = { column: 'Column', beam: 'Beam', wall: 'Wall', window: 'Wind
 const MODE_TEXT = ['fine', 'pulled apart (tension)', 'crushed', 'buckled', 'cracked in bending', 'sheared', 'lost stability', 'tie-down pulled out'];
 const MODE_SHORT = ['', 'tension', 'crushing', 'buckling', 'bending', 'shear', 'instability', 'uplift'];
 const storeyName = (s) => (s === 0 ? 'ground floor' : `${s}${['st', 'nd', 'rd'][s - 1] || 'th'} floor`);
-const pieceStoreyLabel = (p) => (p.type === 'slab' || p.type === 'beam' ? `top of ${storeyName(p.s)}` : p.type === 'roof' ? `on ${storeyName(p.s)}` : storeyName(p.s));
+const pieceStoreyLabel = (p) => (p.type === 'slab' ? (p.s < 0 ? 'ground slab' : `floor of ${storeyName(p.s + 1)}`) : p.type === 'beam' ? `top of ${storeyName(p.s)}` : p.type === 'roof' ? `on ${storeyName(p.s)}` : storeyName(p.s));
 const compass = (deg) => ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'][Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
 const SCENARIOS = [
@@ -195,7 +195,7 @@ function applyStyle() {
 // Build tools
 
 function planeY() {
-  return ['beam', 'slab', 'roof'].includes(state.tool) ? (state.storey + 1) * STOREY : state.storey * STOREY;
+  return ['beam', 'roof'].includes(state.tool) ? (state.storey + 1) * STOREY : state.storey * STOREY;
 }
 const inGridPt = (i, j) => i >= -GRID && i <= GRID && j >= -GRID && j <= GRID;
 
@@ -233,7 +233,8 @@ function candidates(p, start) {
     const a = start ? start.cell : cellAt(p), b = cellAt(p);
     const i0 = Math.min(a.i, b.i), i1 = Math.max(a.i, b.i), j0 = Math.min(a.j, b.j), j1 = Math.max(a.j, b.j);
     if (t === 'slab') {
-      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) out.push({ type: 'slab', mat, i, j, s });
+      // A slab is stored as the top of the storey below it, so the floor of storey s is slab s − 1.
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) out.push({ type: 'slab', mat, i, j, s: s - 1 });
     } else {
       const di = i1 - i0 + 1, dj = j1 - j0 + 1;
       const axis = state.roofAxis === 'auto' ? (di >= dj ? 'x' : 'z') : state.roofAxis;
@@ -244,7 +245,7 @@ function candidates(p, start) {
 }
 
 function validPiece(c) {
-  if (c.s < 0 || c.s >= MAX_STOREYS) return false;
+  if (c.s < (c.type === 'slab' ? -1 : 0) || c.s >= MAX_STOREYS) return false;
   if (c.type === 'column') return inGridPt(c.i, c.j);
   if (c.type === 'slab') return inGridPt(c.i, c.j) && inGridPt(c.i + 1, c.j + 1);
   if (c.type === 'roof') return inGridPt(c.i0, c.j0) && inGridPt(c.i1, c.j1);
@@ -768,7 +769,8 @@ function updateHint() {
 }
 
 function setStorey(s) {
-  state.storey = Math.max(0, Math.min(MAX_STOREYS - 1, s));
+  // One level above the top storey, so it can get a floor (a flat roof) too.
+  state.storey = Math.max(0, Math.min(MAX_STOREYS, s));
   $('#storeyLabel').textContent = storeyName(state.storey).replace(/^./, (c) => c.toUpperCase());
   scene.setLevel(planeY(), state.mode === 'build');
   applyStyle();
