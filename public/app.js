@@ -636,7 +636,11 @@ scene.onFrame = (dt) => {
       const w = Math.min(12, state.test.loads.wind * 0.06 * Math.sqrt(Math.max(1, state.test.frames[idx].lam)));
       for (let k = play.shown + 1; k <= idx; k++) {
         const fell = state.test.frames[k].fell.filter((p) => !play.hidden.has(p));
-        if (fell.length) scene.dropParts(fell, [Math.cos(th) * w, 0, Math.sin(th) * w]);
+        if (!fell.length) continue;
+        // Fall the way the loads were pushing: downwind, or whichever way the ground was swinging.
+        const L = state.test.loads, qa = (L.quakeDir * Math.PI) / 180, sgn = Math.sin(play.shakeT * 2 * Math.PI * 2.2) >= 0 ? 1 : -1;
+        const lean = L.wind > 1 ? [Math.cos(th) * w, Math.sin(th) * w] : L.quake > 0 ? [Math.cos(qa) * sgn, Math.sin(qa) * sgn] : null;
+        scene.dropParts(fell, lean);
       }
       play.shown = Math.max(play.shown, idx);
       play.idx = idx;

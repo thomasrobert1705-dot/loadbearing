@@ -280,9 +280,13 @@ export class Scene3D {
   }
 
   // ---- falling debris ------------------------------------------------------------------
-  // Parts that fall in the same instant and share joints fall as one rigid body.
-  dropParts(indices, push = [0, 0, 0]) {
-    const groups = new Map();
+  // Parts that fall in the same instant and share joints fall as one rigid body. Bodies are real
+  // (if simple) rigid bodies: gravity, an inertia tensor from their joints, and ground contact with
+  // friction, so a wall still standing on its footing pivots about its base and topples. A body that
+  // hits the ground hard breaks into its panels, which tumble on as rubble.
+  // `lean` is the horizontal direction the structure was going when it gave way (wind, quake, or
+  // its own sway); without one, the sway of the falling joints decides.
+  dropParts(indices, lean = null) {
     const parent = new Map();
     const find = (a) => (parent.get(a) === a ? a : (parent.set(a, find(parent.get(a))), parent.get(a)));
     const byNode = new Map();
@@ -294,20 +298,23 @@ export class Scene3D {
         else byNode.set(n, i);
       }
     }
+    const groups = new Map();
     for (const i of indices) {
       const r = find(i);
       if (!groups.has(r)) groups.set(r, []);
       groups.get(r).push(i);
     }
     for (const list of groups.values()) {
-      const pts = [];
-      for (const i of list) for (const n of this.parts[i].part.nodes) pts.push(V(this.posFn(n)));
-      const c = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length);
-      const body = new THREE.Group();
-      body.position.copy(c);
-      const inner = new THREE.Group();
-      inner.position.copy(c).multiplyScalar(-1);
-      body.add(inner);
+      // Direction to fall: the given lean, else how the falling joints were already moving.
+      const sway = new THREE.Vector3();
+      for (const i of list) for (const n of this.parts[i].part.nodes) {
+        const p = this.posFn(n), q = this.base[n];
+        sway.x += p[0] - q[0]; sway.z += p[2] - q[2];
+      }
+      let d = lean ? new THREE.Vector3(lean[0], 0, lean[1]) : sway;
+      if (d.lengthSq() < 1e-10) d = sway;
+      if (d.lengthSq() < 1e-10) d.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+      d.normalize();
       for (const i of list) {
         const p = this.parts[i];
         p.fallen = true;
@@ -319,45 +326,137 @@ export class Scene3D {
           pr.material.transparent = pr.prim.look === 'glass' || pr.material.opacity < 1;
           pr.material.depthWrite = true;
         }
-        inner.add(p.group);
         p.group.visible = true;
       }
-      this.debrisGroup.add(body);
-      const spin = 0.6 + Math.random() * 1.2;
-      this.bodies.push({
-        body, pts: pts.map((p) => p.sub(c)),
-        v: new THREE.Vector3(push[0] * (0.6 + Math.random() * 0.6), 0.5 + push[1], push[2] * (0.6 + Math.random() * 0.6)),
-        w: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(spin),
-        rest: false,
-      });
+      // Freeze where the joints were drawn when it gave way: the parts' geometry stays in that shape.
+      const at = new Map();
+      for (const i of list) for (const n of this.parts[i].part.nodes) if (!at.has(n)) at.set(n, V(this.posFn(n)));
+      const c = new THREE.Vector3();
+      for (const p of at.values()) c.add(p);
+      c.multiplyScalar(1 / at.size);
+      // Topple about a horizontal axis so the top heads towards d, plus a little randomness.
+      const w = new THREE.Vector3(0, 1, 0).cross(d).multiplyScalar(0.35 + Math.random() * 0.25)
+        .add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.15));
+      const v = d.clone().multiplyScalar(0.3 + (lean ? Math.min(3, Math.hypot(lean[0], lean[1])) * 0.3 : 0));
+      this.addBody(list, at, c, c.clone(), new THREE.Quaternion(), v, w, true);
     }
   }
 
+  // A body holds parts whose geometry is in "rest" coordinates: world = R·(x − c0) + position.
+  addBody(list, at, c0, position, quaternion, v, w, canBreak) {
+    const body = new THREE.Group();
+    body.position.copy(position);
+    body.quaternion.copy(quaternion);
+    const inner = new THREE.Group();
+    inner.position.copy(c0).multiplyScalar(-1);
+    body.add(inner);
+    for (const i of list) inner.add(this.parts[i].group);
+    this.debrisGroup.add(body);
+    const pts = [], seen = new Set();
+    for (const i of list) for (const n of this.parts[i].part.nodes) {
+      if (seen.has(n)) continue;
+      seen.add(n);
+      pts.push(at.get(n).clone().sub(c0));
+    }
+    // Inertia of unit point masses at the joints (per unit mass), padded so thin bodies stay finite.
+    let r2max = 0;
+    const I = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (const p of pts) {
+      const r2 = p.lengthSq();
+      r2max = Math.max(r2max, r2);
+      const a = [p.x, p.y, p.z];
+      for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) I[r * 3 + k] += ((r === k ? r2 : 0) - a[r] * a[k]) / pts.length;
+    }
+    const pad = 0.08 * r2max + 0.02;
+    I[0] += pad; I[4] += pad; I[8] += pad;
+    const Iinv = new THREE.Matrix3().set(...I).invert();
+    this.bodies.push({ body, list, at, c0: c0.clone(), pts, Iinv, v, w, rest: false, still: 0, canBreak });
+  }
+
   stepDebris(dt) {
-    const q = new THREE.Quaternion(), tmp = new THREE.Vector3();
+    if (!this.bodies.length) return;
+    const g = 9.81, mu = 0.6, n = Math.max(1, Math.ceil(dt / 0.01)), h = dt / n;
+    const R = new THREE.Matrix3(), Iw = new THREE.Matrix3(), Rt = new THREE.Matrix3();
+    const q = new THREE.Quaternion(), r = new THREE.Vector3(), vel = new THREE.Vector3(), t = new THREE.Vector3();
+    const rxn = new THREE.Vector3(), tmp = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+    const broken = [];
+    // Effective inverse mass of the body at arm r along direction u (unit mass).
+    const kOf = (u) => 1 + tmp.copy(rxn.copy(r).cross(u)).applyMatrix3(Iw).cross(r).dot(u);
+    const impulse = (b, u, j) => {
+      b.v.addScaledVector(u, j);
+      b.w.add(tmp.copy(r).cross(u).multiplyScalar(j).applyMatrix3(Iw));
+    };
     for (const b of this.bodies) {
       if (b.rest) continue;
-      b.v.y -= 9.81 * dt;
-      const drag = Math.exp(-0.6 * dt);
-      b.v.x *= drag; b.v.z *= drag;
-      b.body.position.addScaledVector(b.v, dt);
-      const wl = b.w.length();
-      if (wl > 1e-4) {
-        q.setFromAxisAngle(tmp.copy(b.w).multiplyScalar(1 / wl), wl * dt);
-        b.body.quaternion.premultiply(q);
+      let hardHit = 0;
+      for (let s = 0; s < n; s++) {
+        b.v.y -= g * h;
+        b.body.position.addScaledVector(b.v, h);
+        const wl = b.w.length();
+        if (wl > 1e-6) {
+          q.setFromAxisAngle(t.copy(b.w).multiplyScalar(1 / wl), wl * h);
+          b.body.quaternion.premultiply(q).normalize();
+        }
+        R.setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(b.body.quaternion));
+        Rt.copy(R).transpose();
+        Iw.copy(R).multiply(b.Iinv).multiply(Rt);
+        // Ground contacts: stop the joints going down, with friction along the ground.
+        let deepest = 0;
+        for (let pass = 0; pass < 2; pass++) for (const p of b.pts) {
+          r.copy(p).applyMatrix3(R);
+          const y = b.body.position.y + r.y;
+          if (y > 0) continue;
+          deepest = Math.min(deepest, y);
+          vel.copy(b.w).cross(r).add(b.v);
+          const vn = vel.y;
+          if (vn >= 0) continue;
+          hardHit = Math.max(hardHit, -vn);
+          const e = vn < -1.5 ? 0.15 : 0;
+          const jn = (-(1 + e) * vn) / kOf(Y);
+          impulse(b, Y, jn);
+          vel.copy(b.w).cross(r).add(b.v);
+          t.set(vel.x, 0, vel.z);
+          const vt = t.length();
+          if (vt > 1e-6) {
+            t.multiplyScalar(1 / vt);
+            const jt = Math.min(vt / kOf(t), mu * jn);
+            impulse(b, t, -jt);
+          }
+        }
+        if (deepest < 0) b.body.position.y -= deepest;
+        b.w.multiplyScalar(Math.exp(-0.15 * h));
       }
-      let minY = Infinity;
-      for (const p of b.pts) {
-        tmp.copy(p).applyQuaternion(b.body.quaternion);
-        minY = Math.min(minY, tmp.y + b.body.position.y);
-      }
-      if (minY < 0) {
-        b.body.position.y -= minY;
-        if (b.v.y < 0) b.v.y *= -0.2;
-        b.v.x *= 0.7; b.v.z *= 0.7;
-        b.w.multiplyScalar(0.75);
-        if (b.v.length() < 0.15 && b.w.length() < 0.08) b.rest = true;
-      }
+      if (b.canBreak && hardHit > 2.5) broken.push(b);
+      const slow = b.v.length() < 0.08 && b.w.length() < 0.06;
+      b.still = slow ? b.still + dt : 0;
+      if (b.still > 0.4) b.rest = true;
+    }
+    for (const b of broken) this.breakBody(b);
+  }
+
+  // Split a body into its structural panels (parts sharing the same joints), keeping each piece's
+  // current position and velocity, so a house that hits the ground comes apart.
+  breakBody(b) {
+    const byPanel = new Map();
+    for (const i of b.list) {
+      const k = [...this.parts[i].part.nodes].sort((x, y) => x - y).join(',');
+      if (!byPanel.has(k)) byPanel.set(k, []);
+      byPanel.get(k).push(i);
+    }
+    b.canBreak = false;
+    if (byPanel.size < 2) return;
+    b.body.removeFromParent();
+    this.bodies.splice(this.bodies.indexOf(b), 1);
+    for (const list of byPanel.values()) {
+      const ns = new Set(list.flatMap((i) => this.parts[i].part.nodes));
+      const cs = new THREE.Vector3();
+      for (const nd of ns) cs.add(b.at.get(nd));
+      cs.multiplyScalar(1 / ns.size);
+      const arm = cs.clone().sub(b.c0).applyQuaternion(b.body.quaternion);
+      const pos = arm.clone().add(b.body.position);
+      const v = b.w.clone().cross(arm).add(b.v).multiplyScalar(0.85);
+      const w = b.w.clone().add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(1.2));
+      this.addBody(list, b.at, cs, pos, b.body.quaternion, v, w, false);
     }
   }
 

@@ -129,3 +129,7 @@ than plates. Connections are rigid apart from the roof. Foundations are fixed an
   columns. A beam over the opening acts as a lintel (the wall strip above it is pinned, so it rides on the
   beam instead of cracking in bending). Windows from old 2 m saves are marked `framed` and keep their
   posts, so presets are unchanged.
+- 2026-11-03: Falling parts are rigid bodies with an inertia tensor (from their joints) and ground contact with
+  friction, so a wall still on its footing pivots about its base. Bodies start toppling the way the loads
+  were pushing (downwind, the way the ground was swinging, or the structure's own sway) and break into
+  their panels when they hit the ground hard. No body-to-body collisions: rubble can overlap.
